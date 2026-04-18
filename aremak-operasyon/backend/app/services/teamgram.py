@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 from typing import Optional
 from app.core.config import settings
@@ -35,11 +36,27 @@ async def get_products_all(page: int = 1, pagesize: int = 100) -> dict:
     return await _get(f"{DOMAIN}/Products/GetAll", {"id": 0, "page": page, "pagesize": pagesize})
 
 
-async def get_orders(page: int = 1, pagesize: int = 50, fid: Optional[int] = None) -> dict:
-    params = {"page": page, "pagesize": pagesize}
-    if fid is not None:
-        params["fid"] = fid
-    return await _get_v1(f"{DOMAIN}/Orders/Index", params)
+async def get_orders(page: int = 1, pagesize: int = 50, status: Optional[str] = None) -> dict:
+    """
+    status=None   → all orders: open (fid=0) + closed (fid=-1) merged, includes HasInvoice
+    status=open   → only open orders (Index fid=0)
+    status=closed → only closed orders (Index fid=-1)
+    """
+    if status == "open":
+        return await _get_v1(f"{DOMAIN}/Orders/Index", {"page": page, "pagesize": pagesize, "fid": 0})
+    if status == "closed":
+        return await _get_v1(f"{DOMAIN}/Orders/Index", {"page": page, "pagesize": pagesize, "fid": -1})
+    # All orders: fetch open + closed in parallel (Index returns HasInvoice; GetNew doesn't)
+    open_data, closed_data = await asyncio.gather(
+        _get_v1(f"{DOMAIN}/Orders/Index", {"page": 1, "pagesize": 200, "fid": 0}),
+        _get_v1(f"{DOMAIN}/Orders/Index", {"page": 1, "pagesize": 200, "fid": -1}),
+    )
+    open_list = open_data.get("List", [])
+    closed_list = closed_data.get("List", [])
+    all_orders = open_list + closed_list
+    all_orders.sort(key=lambda o: o.get("OrderDate", ""), reverse=True)
+    total = (open_data.get("OrderCount") or 0) + (closed_data.get("OrderCount") or 0)
+    return {"OrderCount": total, "List": all_orders}
 
 
 async def get_order(order_id: int) -> dict:
@@ -60,6 +77,10 @@ async def get_purchases(page: int = 1, pagesize: int = 50) -> dict:
 
 async def get_product_inventory(product_id: int) -> dict:
     return await _get(f"{DOMAIN}/Products/InventoryOfEntity", {"entityId": product_id})
+
+
+async def get_order_weblink(order_id: int) -> str:
+    return f"https://www.teamgram.com/{DOMAIN}/orders/show?id={order_id}&tab=1"
 
 
 async def get_metadata() -> dict:

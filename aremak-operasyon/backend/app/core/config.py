@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
 
+    PARASUT_CLIENT_ID: str = ""
+    PARASUT_CLIENT_SECRET: str = ""
+    PARASUT_USERNAME: str = ""
+    PARASUT_PASSWORD: str = ""
+    PARASUT_COMPANY_ID: str = "627949"
+
     FRONTEND_URL: str = "http://localhost:5173"
 
     class Config:
