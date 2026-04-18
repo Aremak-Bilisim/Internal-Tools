@@ -71,12 +71,89 @@ async def get_company(company_id: int) -> dict:
     return await _get(f"{DOMAIN}/Companies/Get", {"id": company_id})
 
 
+
 async def get_purchases(page: int = 1, pagesize: int = 50) -> dict:
     return await _get(f"{DOMAIN}/Purchases/Index", {"page": page, "pagesize": pagesize})
 
 
 async def get_product_inventory(product_id: int) -> dict:
     return await _get(f"{DOMAIN}/Products/InventoryOfEntity", {"entityId": product_id})
+
+
+async def upload_payment_document(order_id: int, file_content: bytes, filename: str, content_type: str) -> dict:
+    """
+    Upload a file to TeamGram as an order attachment, then set it as the
+    Ödeme Belgesi custom field (193472) on the order.
+    Returns the attachment dict on success.
+    """
+    import io
+    from urllib.parse import urlparse, parse_qs
+
+    # 1. Upload file to TeamGram
+    url = f"{BASE}/{DOMAIN}/attachment/postattachment"
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            url,
+            headers={"Token": HEADERS["Token"]},
+            files={"file": (filename, io.BytesIO(file_content), content_type)},
+            data={"entityId": str(order_id)},
+        )
+        r.raise_for_status()
+        result = r.json()
+
+    if not result.get("Result"):
+        raise ValueError("TeamGram dosya yüklenemedi")
+
+    att = result["Attachments"][0]
+    att_url = att["Url"]
+
+    # Extract KeyName from URL (?key=aremak/UUID.ext)
+    qs = parse_qs(urlparse(att_url).query)
+    key_name = qs.get("key", [""])[0]
+
+    attachment = {
+        "Id": att["Id"],
+        "KeyName": key_name,
+        "FileName": att["FileName"],
+        "ContentType": content_type,
+        "Orientation": 0,
+        "ContentSize": att.get("ContentSize", 0),
+        "Description": None,
+        "Url": att_url,
+    }
+
+    # 2. Update order custom field 193472 with attachment JSON
+    import json as _json
+    await update_order_custom_fields(order_id, {193472: _json.dumps([attachment])})
+
+    return attachment
+
+
+async def update_order_custom_fields(order_id: int, field_updates: dict) -> bool:
+    """
+    field_updates: {custom_field_id: value_string}
+    Fetches the full order, patches CustomFieldDatas, then POSTs back.
+    """
+    order = await get_order(order_id)
+    order["RelatedEntityId"] = order.get("RelatedEntity", {}).get("Id")
+
+    cfd = order.get("CustomFieldDatas") or []
+    existing_ids = {f["CustomFieldId"] for f in cfd}
+    for cf_id, value in field_updates.items():
+        for f in cfd:
+            if f["CustomFieldId"] == cf_id:
+                f["Value"] = value
+                break
+        else:
+            if cf_id not in existing_ids:
+                cfd.append({"CustomFieldId": cf_id, "Value": value})
+    order["CustomFieldDatas"] = cfd
+
+    url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json=order)
+        result = r.json()
+    return result.get("Result") is True
 
 
 async def get_order_weblink(order_id: int) -> str:

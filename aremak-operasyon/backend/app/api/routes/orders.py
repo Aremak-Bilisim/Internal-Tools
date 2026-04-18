@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from typing import Optional
+from pydantic import BaseModel
 from app.core.auth import get_current_user
 from app.services import teamgram
 
 router = APIRouter()
+
+
+class CustomFieldUpdate(BaseModel):
+    fields: dict  # {str(custom_field_id): value}
 
 
 @router.get("")
@@ -19,6 +24,36 @@ async def list_orders(
 @router.get("/{order_id}")
 async def get_order(order_id: int, current_user=Depends(get_current_user)):
     return await teamgram.get_order(order_id)
+
+
+@router.post("/{order_id}/payment-doc")
+async def upload_payment_doc(
+    order_id: int,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    content = await file.read()
+    try:
+        att = await teamgram.upload_payment_document(
+            order_id, content, file.filename, file.content_type or "application/octet-stream"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"url": att["Url"], "filename": att["FileName"]}
+
+
+@router.put("/{order_id}/custom-fields")
+async def update_custom_fields(
+    order_id: int,
+    data: CustomFieldUpdate,
+    current_user=Depends(get_current_user),
+):
+    int_fields = {int(k): v for k, v in data.fields.items()}
+    ok = await teamgram.update_order_custom_fields(order_id, int_fields)
+    if not ok:
+        raise HTTPException(status_code=502, detail="TeamGram güncellenemedi")
+    return {"ok": True}
+
 
 
 @router.get("/{order_id}/weblink")

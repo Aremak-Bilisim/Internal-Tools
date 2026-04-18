@@ -15,13 +15,24 @@ class ShipmentRequest(Base):
     customer_name = Column(String)
 
     # Shipment info
-    cargo_company = Column(String)          # Yurtiçi Kargo, MNG, vs.
+    delivery_type = Column(String)          # Ofis Teslim | Kargo
+    cargo_company = Column(String)          # Yurtiçi Kargo, MNG, vs. (Kargo için)
     delivery_address = Column(Text)
     notes = Column(Text)
 
     # Invoice info (from TeamGram/Paraşüt)
     invoice_url = Column(String)
     invoice_no = Column(String)
+    invoice_note = Column(Text)           # vergi dairesi, açıklama notu vb.
+    waybill_note = Column(Text)           # irsaliye notu
+
+    # Recipient info
+    recipient_name = Column(String)
+    recipient_phone = Column(String)
+
+    # Shipment details
+    planned_ship_date = Column(String)   # YYYY-MM-DD
+    shipping_doc_type = Column(String)   # Fatura | İrsaliye | Fatura + İrsaliye
 
     # Items: [{"product_id": x, "product_name": "", "quantity": n, "shelf": ""}]
     items = Column(JSON, default=list)

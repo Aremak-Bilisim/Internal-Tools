@@ -67,7 +67,7 @@ export default function ShipmentsPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Sevk Talepleri</Title>
+        <Title level={4} style={{ margin: 0 }}>Sevkiyatlar</Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/shipments/new')}>
           Yeni Talep
         </Button>

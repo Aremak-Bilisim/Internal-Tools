@@ -17,8 +17,8 @@ const { Text } = Typography
 const menuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/products', icon: <InboxOutlined />, label: 'Ürünler' },
-  { key: '/orders', icon: <ShoppingCartOutlined />, label: 'Siparişler' },
-  { key: '/shipments', icon: <SendOutlined />, label: 'Sevk Talepleri' },
+  { key: '/orders', icon: <ShoppingCartOutlined />, label: 'Müşteri Siparişleri' },
+  { key: '/shipments', icon: <SendOutlined />, label: 'Sevkiyatlar' },
 ]
 
 export default function AppLayout() {

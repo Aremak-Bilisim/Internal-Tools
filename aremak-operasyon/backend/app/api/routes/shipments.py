@@ -30,11 +30,18 @@ class ShipmentCreate(BaseModel):
     tg_order_id: Optional[int] = None
     tg_order_name: Optional[str] = None
     customer_name: str
-    cargo_company: str
-    delivery_address: str
+    delivery_type: Optional[str] = None     # Ofis Teslim | Kargo
+    cargo_company: Optional[str] = None
+    delivery_address: Optional[str] = None
     notes: Optional[str] = None
     invoice_url: Optional[str] = None
     invoice_no: Optional[str] = None
+    invoice_note: Optional[str] = None
+    waybill_note: Optional[str] = None
+    recipient_name: Optional[str] = None
+    recipient_phone: Optional[str] = None
+    planned_ship_date: Optional[str] = None
+    shipping_doc_type: Optional[str] = None
     items: list = []
     assigned_to_id: Optional[int] = None
 
@@ -51,11 +58,18 @@ def _shipment_to_dict(s: ShipmentRequest) -> dict:
         "tg_order_id": s.tg_order_id,
         "tg_order_name": s.tg_order_name,
         "customer_name": s.customer_name,
+        "delivery_type": s.delivery_type,
         "cargo_company": s.cargo_company,
         "delivery_address": s.delivery_address,
         "notes": s.notes,
         "invoice_url": s.invoice_url,
         "invoice_no": s.invoice_no,
+        "invoice_note": s.invoice_note,
+        "waybill_note": s.waybill_note,
+        "recipient_name": s.recipient_name,
+        "recipient_phone": s.recipient_phone,
+        "planned_ship_date": s.planned_ship_date,
+        "shipping_doc_type": s.shipping_doc_type,
         "items": s.items or [],
         "stage": s.stage,
         "stage_label": STAGE_LABELS.get(s.stage, s.stage),
@@ -94,11 +108,18 @@ def create_shipment(
         tg_order_id=data.tg_order_id,
         tg_order_name=data.tg_order_name,
         customer_name=data.customer_name,
+        delivery_type=data.delivery_type,
         cargo_company=data.cargo_company,
         delivery_address=data.delivery_address,
         notes=data.notes,
         invoice_url=data.invoice_url,
         invoice_no=data.invoice_no,
+        invoice_note=data.invoice_note,
+        waybill_note=data.waybill_note,
+        recipient_name=data.recipient_name,
+        recipient_phone=data.recipient_phone,
+        planned_ship_date=data.planned_ship_date,
+        shipping_doc_type=data.shipping_doc_type,
         items=data.items,
         assigned_to_id=data.assigned_to_id,
         created_by_id=current_user.id,
