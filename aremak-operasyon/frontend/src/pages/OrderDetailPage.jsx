@@ -2,11 +2,21 @@ import React, { useEffect, useState } from 'react'
 import {
   Card, Descriptions, Tag, Button, Typography, Spin, Divider, Table, message, Popconfirm,
 } from 'antd'
-import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined, FilePdfOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import api from '../services/api'
 
 const { Title, Text } = Typography
+
+const stripHtml = (str) => {
+  if (!str) return ''
+  return str
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/gi, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
 
 const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }
 const STATUS_LABELS = { 0: 'Açık', 1: 'Tamamlandı', 2: 'İptal' }
@@ -28,6 +38,10 @@ export default function OrderDetailPage() {
   const [invoice, setInvoice] = useState(null)
   const [loading, setLoading] = useState(true)
   const [deletingInvoice, setDeletingInvoice] = useState(false)
+  const [invoicePdfLoading, setInvoicePdfLoading] = useState(false)
+  const [invoiceDetails, setInvoiceDetails] = useState(null)
+  const [irsaliye, setIrsaliye] = useState(null)
+  const [irsaliyePdfLoading, setIrsaliyePdfLoading] = useState(false)
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -45,6 +59,19 @@ export default function OrderDetailPage() {
         if (shipmentsRes.status === 'fulfilled') {
           const found = shipmentsRes.value.data.find((s) => s.tg_order_id === Number(id))
           setShipment(found || null)
+          // Fatura detaylarını çek
+          const invId = found?.invoice_url?.split('/').pop()
+          if (invId) {
+            api.get(`/parasut/invoices/${invId}/details`)
+              .then((r) => setInvoiceDetails(r.data))
+              .catch(() => {})
+          }
+          // İrsaliye bilgisini çek
+          if (found?.irsaliye_id) {
+            api.get(`/parasut/irsaliye/${found.irsaliye_id}`)
+              .then((r) => setIrsaliye(r.data))
+              .catch(() => {})
+          }
         }
 
         if (invoicesRes.status === 'fulfilled' && o) {
@@ -72,6 +99,33 @@ export default function OrderDetailPage() {
       message.error(e.response?.data?.detail || 'Fatura silinemedi')
     } finally {
       setDeletingInvoice(false)
+    }
+  }
+
+  const openInvoicePdf = async () => {
+    const invId = invoice?.id || shipment?.invoice_url?.split('/').pop()
+    if (!invId) return
+    setInvoicePdfLoading(true)
+    try {
+      const res = await api.get(`/parasut/invoices/${invId}/pdf-url`)
+      window.open(res.data.url, '_blank')
+    } catch {
+      message.error('Fatura PDF\'i henüz hazır değil')
+    } finally {
+      setInvoicePdfLoading(false)
+    }
+  }
+
+  const openIrsaliyePdf = async () => {
+    if (!shipment?.irsaliye_id) return
+    setIrsaliyePdfLoading(true)
+    try {
+      const res = await api.get(`/parasut/irsaliye/${shipment.irsaliye_id}/pdf-url`)
+      window.open(res.data.url, '_blank')
+    } catch {
+      message.error('İrsaliye PDF\'i henüz hazır değil')
+    } finally {
+      setIrsaliyePdfLoading(false)
     }
   }
 
@@ -129,8 +183,8 @@ export default function OrderDetailPage() {
               <Descriptions.Item label="Tutar (KDV Dahil)">
                 {order?.DiscountedTotal ? `${Number(order.DiscountedTotal).toLocaleString('tr-TR')} ${order.CurrencyName}` : '-'}
               </Descriptions.Item>
-              <Descriptions.Item label="Teslimat Adresi">
-                {order?.DeliveryAddress || '-'}
+              <Descriptions.Item label="Teslimat Adresi" span={2}>
+                {order?.DeliveryAddress ? stripHtml(order.DeliveryAddress) : '-'}
               </Descriptions.Item>
             </Descriptions>
           </Card>
@@ -148,30 +202,44 @@ export default function OrderDetailPage() {
           </Card>
 
           {/* Fatura Bilgileri */}
-          <Card title="Fatura Bilgileri">
-
+          <Card title="Fatura (Paraşüt)">
             {(shipment?.invoice_url || shipment?.invoice_no || invoice) ? (
               <>
                 <Descriptions column={2} size="small">
+                  {invoiceDetails?.contact_name && (
+                    <Descriptions.Item label="Müşteri" span={2}>{invoiceDetails.contact_name}</Descriptions.Item>
+                  )}
                   <Descriptions.Item label="Fatura No">
-                    {(shipment?.invoice_no || invoice?.invoice_no)
-                      ? (shipment?.invoice_no || invoice.invoice_no)
+                    {(shipment?.invoice_no || invoice?.invoice_no || invoiceDetails?.invoice_no)
+                      ? (shipment?.invoice_no || invoice?.invoice_no || invoiceDetails.invoice_no)
                       : <Tag color="orange">Onay Bekleniyor</Tag>}
                   </Descriptions.Item>
-                  {invoice?.issue_date && (
-                    <Descriptions.Item label="Fatura Tarihi">{invoice.issue_date}</Descriptions.Item>
+                  {(invoice?.issue_date || invoiceDetails?.issue_date) && (
+                    <Descriptions.Item label="Fatura Tarihi">{invoice?.issue_date || invoiceDetails.issue_date}</Descriptions.Item>
                   )}
-                  {invoice?.gross_total && (
-                    <Descriptions.Item label="Tutar">
-                      {Number(invoice.gross_total).toLocaleString('tr-TR')} {invoice.currency}
+                  {(invoice?.net_total || invoiceDetails?.net_total) && (
+                    <Descriptions.Item label="Tutar (KDV Dahil)">
+                      {Number(invoice?.net_total || invoiceDetails.net_total).toLocaleString('tr-TR')} {invoice?.currency || invoiceDetails?.currency}
                     </Descriptions.Item>
+                  )}
+                  {invoiceDetails?.description && (
+                    <Descriptions.Item label="Açıklama">{invoiceDetails.description}</Descriptions.Item>
                   )}
                   {shipment?.invoice_note && (
                     <Descriptions.Item label="Fatura Notu" span={2}>{shipment.invoice_note}</Descriptions.Item>
                   )}
                 </Descriptions>
-                {(invoice?.url || shipment?.invoice_url) && (
-                  <div style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  <Button
+                    icon={<FilePdfOutlined />}
+                    size="small"
+                    loading={invoicePdfLoading}
+                    onClick={openInvoicePdf}
+                    style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
+                  >
+                    Fatura PDF
+                  </Button>
+                  {(invoice?.url || shipment?.invoice_url) && (
                     <Button
                       icon={<ExportOutlined />}
                       size="small"
@@ -181,10 +249,8 @@ export default function OrderDetailPage() {
                     >
                       Paraşüt'te Görüntüle
                     </Button>
-                  </div>
-                )}
-                {shipment && (
-                  <div style={{ marginTop: 12 }}>
+                  )}
+                  {shipment && (
                     <Popconfirm
                       title="Faturayı sil"
                       description="Bu fatura Paraşüt'ten silinecek ve sevkiyat kaydından kaldırılacak. Emin misiniz?"
@@ -193,17 +259,62 @@ export default function OrderDetailPage() {
                       cancelText="Vazgeç"
                       okButtonProps={{ danger: true }}
                     >
-                      <Button danger icon={<DeleteOutlined />} loading={deletingInvoice}>
+                      <Button danger icon={<DeleteOutlined />} size="small" loading={deletingInvoice}>
                         Faturayı Sil
                       </Button>
                     </Popconfirm>
-                  </div>
-                )}
+                  )}
+                </div>
               </>
             ) : (
               <Typography.Text type="secondary">Bu sipariş için fatura kaydı yok.</Typography.Text>
             )}
           </Card>
+
+          {/* İrsaliye Bilgileri */}
+          {shipment?.irsaliye_id && (
+            <Card title="İrsaliye (Paraşüt)">
+              <Descriptions column={2} size="small">
+                {irsaliye?.contact_name && (
+                  <Descriptions.Item label="Müşteri" span={2}>{irsaliye.contact_name}</Descriptions.Item>
+                )}
+                <Descriptions.Item label="İrsaliye No">
+                  {irsaliye?.irsaliye_no
+                    ? irsaliye.irsaliye_no
+                    : <Tag color="orange">Onay Bekleniyor</Tag>}
+                </Descriptions.Item>
+                {irsaliye?.issue_date && (
+                  <Descriptions.Item label="Düzenleme Tarihi">{irsaliye.issue_date}</Descriptions.Item>
+                )}
+                {irsaliye?.shipment_date && (
+                  <Descriptions.Item label="Sevk Tarihi">{irsaliye.shipment_date?.slice(0, 10)}</Descriptions.Item>
+                )}
+                {irsaliye?.description && (
+                  <Descriptions.Item label="Açıklama">{irsaliye.description}</Descriptions.Item>
+                )}
+              </Descriptions>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <Button
+                  icon={<FilePdfOutlined />}
+                  size="small"
+                  loading={irsaliyePdfLoading}
+                  onClick={openIrsaliyePdf}
+                  style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
+                >
+                  İrsaliye PDF
+                </Button>
+                <Button
+                  icon={<ExportOutlined />}
+                  size="small"
+                  href={irsaliye?.url || `https://uygulama.parasut.com/627949/irsaliyeler/${shipment.irsaliye_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Paraşüt'te Görüntüle
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {/* Kalemler */}
           {order?.Items?.length > 0 && (
@@ -219,23 +330,39 @@ export default function OrderDetailPage() {
           )}
 
           {/* Sevkiyat */}
-          <Card title="Sevkiyat">
+          <Card
+            title="Sevkiyat"
+            extra={shipment && (
+              <Button size="small" onClick={() => navigate(`/shipments/${shipment.id}`)}>
+                Sevkiyat Detayı
+              </Button>
+            )}
+          >
             {shipment ? (
               <Descriptions column={2} size="small">
                 <Descriptions.Item label="Aşama">
                   <Tag color={STAGE_COLORS[shipment.stage]}>{STAGE_LABELS[shipment.stage] || shipment.stage_label}</Tag>
                 </Descriptions.Item>
                 <Descriptions.Item label="Teslim Şekli">{shipment.delivery_type || '-'}</Descriptions.Item>
-                <Descriptions.Item label="Kargo Firması">{shipment.cargo_company || '-'}</Descriptions.Item>
-                <Descriptions.Item label="Takip No">{shipment.cargo_tracking_no || '-'}</Descriptions.Item>
+
                 <Descriptions.Item label="Planlanan Tarih">{shipment.planned_ship_date || '-'}</Descriptions.Item>
-                <Descriptions.Item label="Alıcı">{shipment.recipient_name || '-'}</Descriptions.Item>
-                <Descriptions.Item label="Alıcı Telefonu">{shipment.recipient_phone || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Gönderim Belgesi">{shipment.shipping_doc_type || '-'}</Descriptions.Item>
+
+                {shipment.delivery_type === 'Kargo' && <>
+                  <Descriptions.Item label="Kargo Firması">{shipment.cargo_company || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Takip No">{shipment.cargo_tracking_no || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Alıcı">{shipment.recipient_name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Alıcı Telefonu">{shipment.recipient_phone || '-'}</Descriptions.Item>
+                </>}
+
+                {(shipment.delivery_address || shipment.delivery_district || shipment.delivery_city) && (
+                  <Descriptions.Item label="Sevkiyat Adresi" span={2}>
+                    {[shipment.delivery_address, shipment.delivery_district, shipment.delivery_city, shipment.delivery_zip]
+                      .filter(Boolean).join(', ')}
+                  </Descriptions.Item>
+                )}
+
                 {shipment.notes && <Descriptions.Item label="Notlar" span={2}>{shipment.notes}</Descriptions.Item>}
-                <Descriptions.Item label="">
-                  <Button size="small" onClick={() => navigate(`/shipments/${shipment.id}`)}>Sevkiyat Detayı</Button>
-                </Descriptions.Item>
               </Descriptions>
             ) : (
               <Text type="secondary">Bu sipariş için henüz sevkiyat kaydı yok.</Text>

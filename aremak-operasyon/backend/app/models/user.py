@@ -13,4 +13,6 @@ class User(Base):
     # Roles: admin | sales | warehouse
     role = Column(String, nullable=False, default="sales")
     is_active = Column(Boolean, default=True)
+    # Optional override: if set, notifications go here instead of `email`
+    notification_email = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

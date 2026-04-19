@@ -48,6 +48,9 @@ class ShipmentRequest(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"))
     assigned_to_id = Column(Integer, ForeignKey("users.id"))   # warehouse staff
 
+    # Paraşüt irsaliye
+    irsaliye_id = Column(String)          # shipment_document id (Paraşüt)
+
     # File uploads
     cargo_photo_urls = Column(JSON, default=list)
     cargo_tracking_no = Column(String)

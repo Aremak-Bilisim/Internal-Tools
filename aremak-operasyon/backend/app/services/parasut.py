@@ -169,6 +169,41 @@ def build_invoice_map(invoices: list) -> dict:
     return result
 
 
+async def get_invoice_details(invoice_id: str) -> Optional[dict]:
+    """Tek fatura için özet bilgileri döner."""
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{BASE}/v4/{COMPANY}/sales_invoices/{invoice_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"include": "contact"},
+        )
+        if not r.is_success:
+            return None
+        data = r.json()
+
+    inv = data["data"]
+    attrs = inv.get("attributes", {})
+    included = {f"{i['type']}/{i['id']}": i for i in data.get("included", [])}
+    contact_rel = inv.get("relationships", {}).get("contact", {}).get("data")
+    contact_name = ""
+    if contact_rel:
+        c = included.get(f"{contact_rel['type']}/{contact_rel['id']}", {})
+        contact_name = c.get("attributes", {}).get("name", "")
+
+    return {
+        "id": inv["id"],
+        "invoice_no": attrs.get("invoice_no") or attrs.get("invoice_id", ""),
+        "description": attrs.get("description", ""),
+        "issue_date": attrs.get("issue_date", ""),
+        "gross_total": attrs.get("gross_total", ""),
+        "net_total": attrs.get("net_total", ""),
+        "currency": attrs.get("currency", "TRL"),
+        "contact_name": contact_name,
+        "url": f"https://uygulama.parasut.com/{COMPANY}/satislar/{inv['id']}",
+    }
+
+
 async def get_invoice_pdf_url(invoice_id: str) -> Optional[str]:
     """Get temporary PDF URL for an invoice (valid ~1 hour)."""
     token = await _get_token()
@@ -206,6 +241,50 @@ async def get_invoice_pdf_url(invoice_id: str) -> Optional[str]:
 
 async def invalidate_cache():
     _invoice_cache.clear()
+
+
+async def get_irsaliye_pdf_url(irsaliye_id: str) -> Optional[str]:
+    """Shipment document (irsaliye) için geçici PDF URL döner."""
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{BASE}/v4/{COMPANY}/shipment_documents/{irsaliye_id}/pdf",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if r.status_code == 204 or not r.is_success:
+            return None
+        data = r.json()
+    return data.get("data", {}).get("attributes", {}).get("url")
+
+
+async def get_irsaliye_info(irsaliye_id: str) -> Optional[dict]:
+    """Shipment document bilgilerini döner (numara, tarih, url)."""
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{BASE}/v4/{COMPANY}/shipment_documents/{irsaliye_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"include": "contact"},
+        )
+        if not r.is_success:
+            return None
+        data = r.json()
+        attrs = data["data"]["attributes"]
+        included = {f"{i['type']}/{i['id']}": i for i in data.get("included", [])}
+        contact_rel = data["data"].get("relationships", {}).get("contact", {}).get("data")
+        contact_name = ""
+        if contact_rel:
+            c = included.get(f"{contact_rel['type']}/{contact_rel['id']}", {})
+            contact_name = c.get("attributes", {}).get("name", "")
+    return {
+        "id": irsaliye_id,
+        "irsaliye_no": attrs.get("despatch_no"),
+        "description": attrs.get("description"),
+        "issue_date": attrs.get("issue_date"),
+        "shipment_date": attrs.get("shipment_date"),
+        "contact_name": contact_name,
+        "url": f"https://uygulama.parasut.com/{COMPANY}/irsaliyeler/{irsaliye_id}",
+    }
 
 
 WAREHOUSE_ID = "1000081985"  # Ana Depo

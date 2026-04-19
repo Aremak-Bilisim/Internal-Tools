@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Table, Card, Tag, Button, Typography, Space, Tabs } from 'antd'
-import { PlusOutlined, EyeOutlined } from '@ant-design/icons'
+import { EyeOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -66,11 +66,8 @@ export default function ShipmentsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>Sevkiyatlar</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/shipments/new')}>
-          Yeni Talep
-        </Button>
       </div>
 
       <Card>

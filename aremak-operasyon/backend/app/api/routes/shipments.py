@@ -66,6 +66,7 @@ class StageAdvance(BaseModel):
 def _shipment_to_dict(s: ShipmentRequest) -> dict:
     return {
         "id": s.id,
+        "irsaliye_id": s.irsaliye_id,
         "tg_order_id": s.tg_order_id,
         "tg_order_name": s.tg_order_name,
         "customer_name": s.customer_name,
@@ -210,7 +211,7 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
                     f"delivery_type={dlv_type!r} cargo_company={cargo_co!r}\n"
                 )
             try:
-                asyncio.run(parasut.create_irsaliye_from_invoice(
+                result = asyncio.run(parasut.create_irsaliye_from_invoice(
                     invoice_id,
                     issue_date=planned_date,
                     delivery_address=addr,
@@ -220,7 +221,13 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
                     delivery_type=dlv_type,
                     cargo_company=cargo_co,
                 ))
-                logger.info(f"İrsaliye created for invoice {invoice_id}")
+                irsaliye_id = result.get("data", {}).get("id")
+                if irsaliye_id:
+                    db.query(ShipmentRequest).filter(
+                        ShipmentRequest.id == shipment["id"]
+                    ).update({"irsaliye_id": irsaliye_id})
+                    db.commit()
+                logger.info(f"İrsaliye created for invoice {invoice_id}: {irsaliye_id}")
             except Exception as e:
                 msg = f"Paraşüt'te irsaliye oluşturulamadı: {e}"
                 logger.error(f"Paraşüt irsaliye failed for invoice {invoice_id}: {e}")
@@ -267,7 +274,8 @@ def advance_stage(
         raise HTTPException(status_code=403, detail=f"Bu aşamayı geçmek için yetkiniz yok")
 
     old_stage = s.stage
-    s.stage = transition["next"]
+    new_stage = transition["next"]
+    s.stage = new_stage
 
     if data.cargo_tracking_no:
         s.cargo_tracking_no = data.cargo_tracking_no
@@ -277,13 +285,38 @@ def advance_stage(
     history = ShipmentHistory(
         shipment_id=s.id,
         stage_from=old_stage,
-        stage_to=s.stage,
+        stage_to=new_stage,
         note=data.note,
         user_id=current_user.id,
     )
     db.add(history)
     db.commit()
     db.refresh(s)
+
+    # Email notifications
+    try:
+        shipment_dict = _shipment_to_dict(s)
+        admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+        warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
+        sales_users = db.query(User).filter(User.role == "sales", User.is_active == True).all()
+
+        admin_list = [(email_svc._notif_email(u), u.name) for u in admins]
+        warehouse_list = [(email_svc._notif_email(u), u.name) for u in warehouse_users]
+        sales_list = [(email_svc._notif_email(u), u.name) for u in sales_users]
+
+        if new_stage == "pending_admin":
+            email_svc.send_pending_admin(shipment_dict, admin_list)
+        elif new_stage == "preparing":
+            email_svc.send_approved_to_warehouse(shipment_dict, warehouse_list)
+        elif new_stage == "pending_waybill_approval":
+            email_svc.send_waybill_approval_request(shipment_dict, admin_list)
+        elif new_stage == "ready_to_ship":
+            email_svc.send_ready_to_ship(shipment_dict, warehouse_list)
+        elif new_stage == "shipped":
+            email_svc.send_shipped(shipment_dict, admin_list, sales_list)
+    except Exception as e:
+        logger.error(f"Stage transition email failed ({old_stage} → {new_stage}): {e}")
+
     return _shipment_to_dict(s)
 
 

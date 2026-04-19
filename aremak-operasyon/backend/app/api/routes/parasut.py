@@ -11,6 +11,14 @@ async def list_invoices(current_user=Depends(get_current_user)):
     return {"invoices": invoices}
 
 
+@router.get("/invoices/{invoice_id}/details")
+async def get_invoice_details(invoice_id: str, current_user=Depends(get_current_user)):
+    details = await parasut.get_invoice_details(invoice_id)
+    if not details:
+        raise HTTPException(status_code=404, detail="Fatura bulunamadı")
+    return details
+
+
 @router.get("/invoices/{invoice_id}/pdf-url")
 async def get_invoice_pdf_url(invoice_id: str, current_user=Depends(get_current_user)):
     url = await parasut.get_invoice_pdf_url(invoice_id)
@@ -24,6 +32,22 @@ async def refresh_invoices(current_user=Depends(get_current_user)):
     await parasut.invalidate_cache()
     invoices = await parasut.get_invoices()
     return {"invoices": invoices, "count": len(invoices)}
+
+
+@router.get("/irsaliye/{irsaliye_id}")
+async def get_irsaliye(irsaliye_id: str, current_user=Depends(get_current_user)):
+    info = await parasut.get_irsaliye_info(irsaliye_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="İrsaliye bulunamadı")
+    return info
+
+
+@router.get("/irsaliye/{irsaliye_id}/pdf-url")
+async def get_irsaliye_pdf_url(irsaliye_id: str, current_user=Depends(get_current_user)):
+    url = await parasut.get_irsaliye_pdf_url(irsaliye_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="İrsaliye PDF'i henüz hazır değil")
+    return {"url": url}
 
 
 @router.get("/invoices/debug")
