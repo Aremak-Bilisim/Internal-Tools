@@ -18,6 +18,9 @@ class ShipmentRequest(Base):
     delivery_type = Column(String)          # Ofis Teslim | Kargo
     cargo_company = Column(String)          # Yurtiçi Kargo, MNG, vs. (Kargo için)
     delivery_address = Column(Text)
+    delivery_district = Column(String)       # İlçe
+    delivery_city = Column(String)           # İl
+    delivery_zip = Column(String)            # Posta kodu
     notes = Column(Text)
 
     # Invoice info (from TeamGram/Paraşüt)

@@ -41,6 +41,9 @@ class ShipmentCreate(BaseModel):
     delivery_type: Optional[str] = None     # Ofis Teslim | Kargo
     cargo_company: Optional[str] = None
     delivery_address: Optional[str] = None
+    delivery_district: Optional[str] = None
+    delivery_city: Optional[str] = None
+    delivery_zip: Optional[str] = None
     notes: Optional[str] = None
     invoice_url: Optional[str] = None
     invoice_no: Optional[str] = None
@@ -69,6 +72,9 @@ def _shipment_to_dict(s: ShipmentRequest) -> dict:
         "delivery_type": s.delivery_type,
         "cargo_company": s.cargo_company,
         "delivery_address": s.delivery_address,
+        "delivery_district": s.delivery_district,
+        "delivery_city": s.delivery_city,
+        "delivery_zip": s.delivery_zip,
         "notes": s.notes,
         "invoice_url": s.invoice_url,
         "invoice_no": s.invoice_no,
@@ -112,6 +118,16 @@ def create_shipment(
     db: Session = Depends(get_db),
     current_user=Depends(require_role("admin", "sales")),
 ):
+    import datetime as _dt
+    with open("debug_shipment.log", "a", encoding="utf-8") as _f:
+        _f.write(
+            f"[{_dt.datetime.now()}] create_shipment: "
+            f"addr={data.delivery_address!r} "
+            f"district={data.delivery_district!r} "
+            f"city={data.delivery_city!r} "
+            f"zip={data.delivery_zip!r} "
+            f"doc_type={data.shipping_doc_type!r}\n"
+        )
     s = ShipmentRequest(
         tg_order_id=data.tg_order_id,
         tg_order_name=data.tg_order_name,
@@ -119,6 +135,9 @@ def create_shipment(
         delivery_type=data.delivery_type,
         cargo_company=data.cargo_company,
         delivery_address=data.delivery_address,
+        delivery_district=data.delivery_district,
+        delivery_city=data.delivery_city,
+        delivery_zip=data.delivery_zip,
         notes=data.notes,
         invoice_url=data.invoice_url,
         invoice_no=data.invoice_no,
@@ -138,14 +157,18 @@ def create_shipment(
     db.refresh(s)
     result = _shipment_to_dict(s)
 
-    # Post-creation side effects (non-blocking failures)
-    _post_create_effects(db, result, data.tg_order_id)
+    # Post-creation side effects — hataları topla, response'a ekle
+    warnings = _post_create_effects(db, result, data.tg_order_id)
+    result["warnings"] = warnings
 
     return result
 
 
-def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]):
-    """Email notification + TeamGram update + Paraşüt irsaliye after shipment creation."""
+def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]) -> list:
+    """Email notification + TeamGram update + Paraşüt irsaliye after shipment creation.
+    Returns list of warning strings for any non-fatal failures."""
+    warnings = []
+
     # 1. Send email to all warehouse users
     warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
     for u in warehouse_users:
@@ -164,14 +187,46 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
     # 3. Paraşüt irsaliye — only when shipping_doc_type includes İrsaliye
     doc_type = shipment.get("shipping_doc_type") or ""
     invoice_url = shipment.get("invoice_url") or ""
-    if "İrsaliye" in doc_type and invoice_url:
-        invoice_id = invoice_url.rstrip("/").split("/")[-1]
-        planned_date = shipment.get("planned_ship_date") or None
-        try:
-            asyncio.run(parasut.create_irsaliye_from_invoice(invoice_id, issue_date=planned_date))
-            logger.info(f"İrsaliye created for invoice {invoice_id}")
-        except Exception as e:
-            logger.error(f"Paraşüt irsaliye failed for invoice {invoice_id}: {e}")
+    if "İrsaliye" in doc_type:
+        if not invoice_url:
+            msg = "Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. İrsaliye oluşturulamadı."
+            logger.warning(msg)
+            warnings.append(msg)
+        else:
+            invoice_id = invoice_url.rstrip("/").split("/")[-1]
+            planned_date = shipment.get("planned_ship_date") or None
+            addr = shipment.get("delivery_address")
+            dist = shipment.get("delivery_district")
+            city = shipment.get("delivery_city")
+            zipp = shipment.get("delivery_zip")
+            dlv_type = shipment.get("delivery_type")
+            cargo_co = shipment.get("cargo_company")
+            import datetime as _dt2
+            with open("debug_shipment.log", "a", encoding="utf-8") as _f2:
+                _f2.write(
+                    f"[{_dt2.datetime.now()}] irsaliye_params: "
+                    f"invoice={invoice_id} date={planned_date} "
+                    f"addr={addr!r} dist={dist!r} city={city!r} zip={zipp!r} "
+                    f"delivery_type={dlv_type!r} cargo_company={cargo_co!r}\n"
+                )
+            try:
+                asyncio.run(parasut.create_irsaliye_from_invoice(
+                    invoice_id,
+                    issue_date=planned_date,
+                    delivery_address=addr,
+                    delivery_district=dist,
+                    delivery_city=city,
+                    delivery_zip=zipp,
+                    delivery_type=dlv_type,
+                    cargo_company=cargo_co,
+                ))
+                logger.info(f"İrsaliye created for invoice {invoice_id}")
+            except Exception as e:
+                msg = f"Paraşüt'te irsaliye oluşturulamadı: {e}"
+                logger.error(f"Paraşüt irsaliye failed for invoice {invoice_id}: {e}")
+                warnings.append(msg)
+
+    return warnings
 
 
 @router.get("/{shipment_id}")

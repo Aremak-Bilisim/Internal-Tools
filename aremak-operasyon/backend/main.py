@@ -1,8 +1,14 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import Base, engine
 from app.api import api_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,4 +27,4 @@ app.include_router(api_router, prefix="/api")
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "debug": True}

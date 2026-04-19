@@ -18,6 +18,59 @@ const CARGO_COMPANIES = ['Yurtiçi Kargo', 'MNG Kargo', 'Aras Kargo', 'PTT Kargo
 
 const normalize = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
 
+/**
+ * HTML tag ve entity'lerini temizler. <br> → newline, diğer taglar → boşluk.
+ */
+const stripHtml = (str) => {
+  if (!str) return ''
+  return str
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
+
+/**
+ * TeamGram'dan gelen tek parça adresi 4 parçaya ayırmaya çalışır.
+ * Türkçe yaygın format: "Sokak No:X\nİlçe/Şehir" veya "Sokak No:X, İlçe/Şehir 34000"
+ */
+const parseAddress = (raw) => {
+  if (!raw) return { addr_line: '', addr_district: '', addr_city: '', addr_zip: '' }
+
+  // Posta kodunu bul (5 haneli sayı)
+  const zipMatch = raw.match(/\b(\d{5})\b/)
+  const zip = zipMatch ? zipMatch[1] : ''
+
+  // Satırlara veya virgüle böl
+  const lines = raw.split(/\n/).map(l => l.trim()).filter(Boolean)
+
+  // "İlçe/Şehir" kalıbını ara (son satırdan başla)
+  let district = '', city = ''
+  let districtLineIdx = -1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].replace(/\b\d{5}\b/, '').trim().match(/^([^/,]+)\/(.+)$/)
+    if (m) {
+      district = m[1].trim()
+      city = m[2].trim()
+      districtLineIdx = i
+      break
+    }
+  }
+
+  // Adres satırı: ilçe/şehir satırı çıkarılmış hali, posta kodu temizlenmiş
+  const addrLines = lines
+    .filter((_, i) => i !== districtLineIdx)
+    .map(l => l.replace(/\b\d{5}\b/, '').replace(/,\s*$/, '').trim())
+    .filter(Boolean)
+  const addrLine = addrLines.join('\n')
+
+  return { addr_line: addrLine || raw, addr_district: district, addr_city: city, addr_zip: zip }
+}
+
 export default function OrdersPage() {
   const navigate = useNavigate()
   const [data, setData] = useState({ List: [], OrderCount: 0 })
@@ -50,17 +103,21 @@ export default function OrdersPage() {
   const [invoiceRefreshing, setInvoiceRefreshing] = useState(false)
 
   const buildInvoiceMaps = (invoices) => {
-
+    // nameMap & taxMap → { key: [invoice, ...] }  (tüm faturalar, sadece en son değil)
     const nameMap = {}
     const taxMap = {}
     const descMap = {}
     for (const inv of invoices) {
       const nameKey = inv.contact_name_normalized
-      if (nameKey && (!nameMap[nameKey] || inv.issue_date > nameMap[nameKey].issue_date))
-        nameMap[nameKey] = inv
+      if (nameKey) {
+        if (!nameMap[nameKey]) nameMap[nameKey] = []
+        nameMap[nameKey].push(inv)
+      }
       const taxKey = (inv.contact_tax_number || '').trim()
-      if (taxKey && (!taxMap[taxKey] || inv.issue_date > taxMap[taxKey].issue_date))
-        taxMap[taxKey] = inv
+      if (taxKey) {
+        if (!taxMap[taxKey]) taxMap[taxKey] = []
+        taxMap[taxKey].push(inv)
+      }
       const desc = (inv.description || '').trim()
       if (desc) descMap[desc] = inv
     }
@@ -134,15 +191,26 @@ export default function OrdersPage() {
     if (!orders.length || !hasInvoiceData) { setOrderInvoiceMap({}); return }
 
     const toTRL = (amount, currency, rates) => {
-      if (!currency || currency === 'TRL' || currency === 'TRY') return amount
-      return amount * (rates[currency] || 1)
+      if (!currency || currency === 'TRL' || currency === 'TRY') return parseFloat(amount) || 0
+      return (parseFloat(amount) || 0) * (rates[currency] || 1)
+    }
+
+    // Tutar benzerlik skoru: 0=mükemmel, 1=tamamen farklı
+    // Fatura TRL, sipariş dövizli olabilir → TCMB fatura tarihindeki satış kuru
+    const amountScore = (order, inv, rates) => {
+      const orderTRL = toTRL(order.DiscountedTotal, order.CurrencyName, rates)
+      const invTRL = parseFloat(inv.gross_total || 0)
+      if (orderTRL === 0 || invTRL === 0) return 0.5  // tutar yoksa nötr
+      return Math.abs(orderTRL - invTRL) / Math.max(orderTRL, invTRL)
     }
 
     ;(async () => {
       const result = {}
+      const usedInvoiceIds = new Set()
       const rateCache = {}
 
       const fetchRates = async (dateStr) => {
+        if (!dateStr) return {}
         if (rateCache[dateStr]) return rateCache[dateStr]
         try {
           const res = await api.get(`/tcmb/rates/${dateStr}`)
@@ -151,53 +219,67 @@ export default function OrdersPage() {
         return rateCache[dateStr]
       }
 
-      // 1. Description-based matching (primary — Paraşüt description = TG order name)
+      // 1. Description eşleştirme (kesin, bire-bir)
       for (const order of orders) {
         const displayname = (order.Displayname || '').trim()
-        if (displayname && invoiceDescMap[displayname]) {
-          result[order.Id] = invoiceDescMap[displayname]
+        const inv = invoiceDescMap[displayname]
+        if (displayname && inv && !usedInvoiceIds.has(inv.id)) {
+          result[order.Id] = inv
+          usedInvoiceIds.add(inv.id)
         }
       }
 
-      // 2. Tax-number based matching (fallback)
+      // 2. Vergi no + isim bazlı: tüm (sipariş, fatura) çiftleri için skor hesapla
+      //    Her fatura en fazla 1 siparişe atanır (greedy best-match)
+      const candidates = []  // { score, orderId, invoice }
+
       for (const order of orders) {
         if (result[order.Id]) continue
-        const taxNo = (order.RelatedEntity?.TaxNumber || '').trim()
-        if (taxNo && invoiceTaxMap[taxNo]) {
-          result[order.Id] = invoiceTaxMap[taxNo]
+
+        const taxNo = (order.RelatedEntity?.TaxNo || '').trim()
+        const name = order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || ''
+        const normName = normalize(name)
+
+        // Aday faturalar: vergi no + isim eşleşenlerin birleşimi
+        const seen = new Set()
+        const pool = []
+        const addInvs = (invs) => {
+          for (const inv of (invs || [])) {
+            if (!seen.has(inv.id)) { seen.add(inv.id); pool.push(inv) }
+          }
+        }
+
+        if (taxNo) addInvs(invoiceTaxMap[taxNo])
+        for (const [nameKey, invs] of Object.entries(invoiceMap)) {
+          const prefix = nameKey.slice(0, 20)
+          if (normName === nameKey || (prefix && normName.includes(prefix)) || (normName.slice(0,20) && nameKey.includes(normName.slice(0, 20))))
+            addInvs(invs)
+        }
+
+        for (const inv of pool) {
+          const rates = await fetchRates(inv.issue_date)
+          const score = amountScore(order, inv, rates)
+          candidates.push({ score, orderId: order.Id, invoice: inv })
         }
       }
 
-      // 3. Name-based matching (last fallback)
-      for (const [nameKey, invoice] of Object.entries(invoiceMap)) {
-        const prefix = nameKey.slice(0, 20)
-        const matches = orders.filter((order) => {
-          if (result[order.Id]) return false  // already matched by tax number
-          const name = order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || ''
-          const key = normalize(name)
-          return key === nameKey || key.includes(prefix) || nameKey.includes(key.slice(0, 20))
-        })
-        if (matches.length === 0) continue
-        if (matches.length === 1) { result[matches[0].Id] = invoice; continue }
+      // Skora göre sırala (en iyi = en düşük) ve greedy ata
+      // Eşik: %20'den fazla tutar farkı varsa, şirkete ait başka aday yoksa yine de ata;
+      //       ama birden fazla aday varsa sadece en iyisini al.
+      candidates.sort((a, b) => a.score - b.score)
 
-        const invDate = invoice.issue_date ? new Date(invoice.issue_date) : null
-        let candidates = matches
-        if (invDate) {
-          const diffs = matches.map(o => Math.abs(invDate - new Date(o.OrderDate || '2000-01-01')))
-          const minDiff = Math.min(...diffs)
-          candidates = matches.filter((_, i) => diffs[i] === minDiff)
-        }
-        if (candidates.length === 1) { result[candidates[0].Id] = invoice; continue }
+      for (const { score, orderId, invoice } of candidates) {
+        if (result[orderId]) continue          // sipariş zaten eşleşti
+        if (usedInvoiceIds.has(invoice.id)) continue  // fatura başka siparişe gitti
 
-        const rates = invoice.issue_date ? await fetchRates(invoice.issue_date) : {}
-        const invTRL = toTRL(parseFloat(invoice.gross_total || 0), invoice.currency, rates)
-        let best = candidates[0], bestDiff = Infinity
-        for (const order of candidates) {
-          const orderTRL = toTRL(parseFloat(order.DiscountedTotal || 0), order.CurrencyName, rates)
-          const diff = Math.abs(invTRL - orderTRL)
-          if (diff < bestDiff) { bestDiff = diff; best = order }
-        }
-        result[best.Id] = invoice
+        // Şirkete ait başka kullanılmamış fatura var mı? Varsa %20 eşiğini uygula
+        const hasOtherCandidates = candidates.some(
+          c => c.orderId === orderId && !usedInvoiceIds.has(c.invoice.id) && c.invoice.id !== invoice.id
+        )
+        if (hasOtherCandidates && score > 0.20) continue  // daha iyi aday olabilir, geç
+
+        result[orderId] = invoice
+        usedInvoiceIds.add(invoice.id)
       }
 
       setOrderInvoiceMap(result)
@@ -239,7 +321,9 @@ export default function OrdersPage() {
     try {
       const res = await api.get(`/orders/${order.Id}`)
       const o = res.data
-      const addr = o.DeliveryAddress?.replace(/\r\n/g, '\n').trim() || ''
+      // Sevkiyat adresi: siparişin DeliveryAddress'i — parseAddress ile
+      // il/ilçe/posta kodunu ayrıştırmaya çalış, kullanıcı eksikleri tamamlar
+      const addr = parseAddress(stripHtml(o.DeliveryAddress || '').replace(/\r\n/g, '\n').trim())
       setDrawerItems((o.Items || []).map((item) => ({
         product_name: item.Product?.Displayname || item.Title || '',
         quantity: item.Quantity || 0,
@@ -266,7 +350,10 @@ export default function OrdersPage() {
       try { odemeBelgesi = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
 
       form.setFieldsValue({
-        delivery_address: addr,
+        addr_line: addr.addr_line,
+        addr_district: addr.addr_district,
+        addr_city: addr.addr_city,
+        addr_zip: addr.addr_zip,
         odeme_durumu: odemeLabel,
         beklenen_odeme_tarihi: beklenenVal,
         _odeme_belgesi: odemeBelgesi,
@@ -285,15 +372,33 @@ export default function OrdersPage() {
           return
         }
       }
-      setSubmitting(true)
+      // İrsaliye seçiliyse fatura zorunlu
+      const docType = values.shipping_doc_type || ''
       const inv = findInvoice(drawerOrder)
+      if (docType.includes('İrsaliye') && !inv) {
+        message.error('Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. Devam etmek için önce Paraşüt\'te fatura oluşturun ve faturaları yenileyin.')
+        return
+      }
+
+      console.log('[DEBUG] Form values:', {
+        addr_line: values.addr_line,
+        addr_district: values.addr_district,
+        addr_city: values.addr_city,
+        addr_zip: values.addr_zip,
+        delivery_type: values.delivery_type,
+        shipping_doc_type: values.shipping_doc_type,
+      })
+      setSubmitting(true)
       const shipmentRes = await api.post('/shipments', {
         tg_order_id: drawerOrder.Id,
         tg_order_name: drawerOrder.Displayname,
         customer_name: values.customer_name,
         delivery_type: values.delivery_type || null,
         cargo_company: values.cargo_company || null,
-        delivery_address: values.delivery_address,
+        delivery_address: values.addr_line || null,
+        delivery_district: values.addr_district || null,
+        delivery_city: values.addr_city || null,
+        delivery_zip: values.addr_zip || null,
         notes: values.notes || null,
         invoice_url: inv?.url || null,
         invoice_no: inv?.invoice_no || null,
@@ -337,7 +442,12 @@ export default function OrdersPage() {
       }
 
       setShipmentOrderIds((prev) => new Set([...prev, drawerOrder.Id]))
-      message.success('Sevk talebi oluşturuldu')
+      const resWarnings = shipmentRes.data.warnings || []
+      if (resWarnings.length > 0) {
+        resWarnings.forEach(w => message.warning(w, 8))
+      } else {
+        message.success('Sevk talebi oluşturuldu')
+      }
       setDrawerOpen(false)
       form.resetFields()
       navigate(`/shipments/${shipmentRes.data.id}`)
@@ -649,11 +759,41 @@ export default function OrdersPage() {
                 </Form.Item>
 
                 <Form.Item
-                  name="delivery_address"
-                  label="Teslimat Adresi"
-                  rules={[{ required: true, message: 'Teslimat adresi gerekli' }]}
+                  name="addr_line"
+                  label="Teslimat Adresi (Sokak / Cadde / No / Daire)"
+                  rules={[{ required: true, message: 'Adres gerekli' }]}
                 >
-                  <TextArea rows={3} />
+                  <TextArea rows={2} placeholder="Örn: Atatürk Cad. No:5 Daire:3" />
+                </Form.Item>
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="addr_district"
+                      label="İlçe"
+                      rules={[{ required: true, message: 'İlçe gerekli' }]}
+                    >
+                      <Input placeholder="Örn: Kadıköy" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="addr_city"
+                      label="İl"
+                      rules={[{ required: true, message: 'İl gerekli' }]}
+                    >
+                      <Input placeholder="Örn: İstanbul" />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Form.Item
+                  name="addr_zip"
+                  label="Posta Kodu"
+                  rules={[
+                    { required: true, message: 'Posta kodu gerekli' },
+                    { pattern: /^\d{5}$/, message: '5 haneli posta kodu girin' },
+                  ]}
+                >
+                  <Input placeholder="Örn: 34710" maxLength={5} style={{ width: 120 }} />
                 </Form.Item>
 
                 <Row gutter={12}>

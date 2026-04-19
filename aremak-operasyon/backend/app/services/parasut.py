@@ -1,7 +1,10 @@
 import time
 import httpx
+import logging
 from typing import Optional
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 BASE = "https://api.parasut.com"
 COMPANY = settings.PARASUT_COMPANY_ID
@@ -243,16 +246,82 @@ async def delete_invoice(invoice_id: str) -> bool:
     return r.status_code < 300
 
 
-async def create_irsaliye_from_invoice(invoice_id: str, issue_date: Optional[str] = None) -> dict:
+def _extract_zip(address: str) -> Optional[str]:
+    """Try to find a 5-digit Turkish postal code in the address string."""
+    import re
+    if not address:
+        return None
+    m = re.search(r'\b(\d{5})\b', address)
+    return m.group(1) if m else None
+
+
+def _strip_html(text: str) -> str:
+    """HTML tag ve entity'leri temizler. <br> → boşluk, diğer taglar → boşluk."""
+    import re
+    if not text:
+        return text
+    text = re.sub(r'<br\s*/?>', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&nbsp;', ' ')
+    text = re.sub(r'[ \t]+', ' ', text)
+    return text.strip()
+
+
+# Kargo şirketi adı → (carrier_legal_name, carrier_tax_number)
+CARGO_COMPANY_MAP = {
+    "yurtiçi kargo":  ("YURTİÇİ KARGO SERVİSİ ANONİM ŞİRKETİ", "9860008925"),
+    "yurtici kargo":  ("YURTİÇİ KARGO SERVİSİ ANONİM ŞİRKETİ", "9860008925"),
+    "mng kargo":      ("MNG KARGO SERVİSİ ANONİM ŞİRKETİ", "6150171568"),
+    "aras kargo":     ("ARAS KARGO SERVİS DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ", "1490078198"),
+    "ptt kargo":      ("POSTA VE TELGRAF TEŞKİLATI ANONİM ŞİRKETİ", "5920024812"),
+    "dhl":            ("DHL EXPRESS TURKEY TAŞIMACILIK LIMITED ŞİRKETİ", "3490054308"),
+    "fedex":          ("FEDERAL EXPRESS CORPORATION TÜRKİYE ŞUBE", ""),
+    "ups":            ("UNITED PARCEL SERVICE INC. TÜRKİYE ŞUBE", ""),
+    "sürat kargo":    ("SÜRAT KARGO VE LOJİSTİK ANONİM ŞİRKETİ", "4690065236"),
+    "surat kargo":    ("SÜRAT KARGO VE LOJİSTİK ANONİM ŞİRKETİ", "4690065236"),
+}
+
+
+async def create_irsaliye_from_invoice(
+    invoice_id: str,
+    issue_date: Optional[str] = None,
+    delivery_address: Optional[str] = None,
+    delivery_district: Optional[str] = None,
+    delivery_city: Optional[str] = None,
+    delivery_zip: Optional[str] = None,
+    delivery_type: Optional[str] = None,    # "Kargo" | "Ofis Teslim"
+    cargo_company: Optional[str] = None,    # "Yurtiçi Kargo" vb.
+) -> dict:
     """
     1. Fetch invoice to get contact + line items with products.
     2. PATCH invoice to set shipment_included=false (stok çıkışı yapılmasın).
     3. POST shipment_document linked to invoice with stock_movements.
+
+    - Kargo: carrier_legal_name + carrier_tax_number (CARGO_COMPANY_MAP)
+    - Ofis Teslim / Taşıyıcı: carrier_license_plate = XXXXXXXX
+    - issue_date: today (creation date)
+    - shipment_date: planned_ship_date + T23:59:59 (always >= issue_date midnight)
     """
     import datetime
 
+    today = datetime.date.today()
+    now_utc = datetime.datetime.utcnow()
     if not issue_date:
-        issue_date = datetime.date.today().isoformat()
+        issue_date = today.isoformat()
+
+    # Düzenleme tarihi saati: irsaliyenin oluşturulduğu an (UTC, Z suffix ile)
+    issue_datetime_utc = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Fiili sevk tarihi: planlanan tarih, saat 12:00 UTC (= 15:00 TR saati)
+    # → issue_date ile aynı gün, düzenleme tarihinden sonra
+    try:
+        ship_date = datetime.date.fromisoformat(issue_date)
+    except Exception:
+        ship_date = today
+    if ship_date < today:
+        ship_date = today
+    # T12:00:00 UTC = 15:00 TR → planlanan günde kalır, gece yarısından sonra
+    shipment_datetime = f"{ship_date.isoformat()}T12:00:00Z"
 
     token = await _get_token()
     async with httpx.AsyncClient(timeout=30) as client:
@@ -298,11 +367,76 @@ async def create_irsaliye_from_invoice(invoice_id: str, issue_date: Optional[str
             },
         })
 
-    # Step 3: create shipment document
+    # Step 3: irsaliye adı = fatura açıklaması veya fatura no
+    inv_attrs = inv.get("attributes", {})
+    irsaliye_desc = (
+        inv_attrs.get("description")
+        or inv_attrs.get("invoice_no")
+        or inv_attrs.get("invoice_id")
+        or ""
+    )
+
+    # Step 4: build payload with correct Paraşüt field names
+    # HTML temizle (TeamGram'dan <br> vb. gelebilir)
+    delivery_address  = _strip_html(delivery_address)
+    delivery_district = _strip_html(delivery_district)
+    delivery_city     = _strip_html(delivery_city)
+
+    # Posta kodu: explicit parametre → adresten regex → "00000"
+    dest_zip = delivery_zip or _extract_zip(delivery_address) or "00000"
+
+    # Sevkiyat yöntemi: Kargo → carrier_legal_name + carrier_tax_number
+    #                   Ofis Teslim → carrier_license_plate = XXXXXXXX
+    carrier_legal_name = None
+    carrier_tax_number = None
+    carrier_license_plate = None
+
+    if delivery_type == "Kargo" and cargo_company:
+        key = cargo_company.lower().strip()
+        mapped = CARGO_COMPANY_MAP.get(key)
+        if mapped:
+            carrier_legal_name, carrier_tax_number = mapped
+        else:
+            # Bilinmeyen kargo: adı olduğu gibi gönder
+            carrier_legal_name = cargo_company
+    elif delivery_type == "Ofis Teslim":
+        carrier_license_plate = "XXXXXXXX"
+        # Not: drivers_info (şoför adı/TCKN) Paraşüt API'si üzerinden
+        # set edilemiyor — e-irsaliye imzalama sürecinde GİB tarafından dolduruluyor.
+        # Ofis teslimde varış adresi = çıkış adresi (depo)
+        delivery_address  = "Beştepe Mah. Nergis Sok. No:7/2"
+        delivery_district = "Yenimahalle"
+        delivery_city     = "Ankara"
+        dest_zip          = "06560"
+
+    attrs: dict = {
+        "inflow": False,
+        "issue_date": issue_date,
+        "issue_datetime": issue_datetime_utc,
+        "shipment_date": shipment_datetime,
+        "description": irsaliye_desc,
+        # Sevkiyat (varış) adresi
+        "address":     (delivery_address or "").strip() or None,
+        "district":    (delivery_district or "").strip() or None,
+        "city":        (delivery_city or "").strip() or None,
+        "postal_code": dest_zip,
+        # Çıkış adresi (sabit depo adresi)
+        "company_address":     "Beştepe Mah. Nergis Sok. No:7/2",
+        "company_district":    "Yenimahalle",
+        "company_city":        "Ankara",
+        "company_postal_code": "06560",
+        # Sevkiyat yöntemi
+        "carrier_legal_name":    carrier_legal_name,
+        "carrier_tax_number":    carrier_tax_number,
+        "carrier_license_plate": carrier_license_plate,
+    }
+    # None değerleri çıkar (Paraşüt boş string yerine null bekler)
+    attrs = {k: v for k, v in attrs.items() if v is not None}
+
     payload = {
         "data": {
             "type": "shipment_documents",
-            "attributes": {"inflow": False, "issue_date": issue_date},
+            "attributes": attrs,
             "relationships": {
                 "contact": {"data": {"type": "contacts", "id": contact_id}},
                 "invoices": {"data": [{"type": "sales_invoices", "id": str(invoice_id)}]},
@@ -311,4 +445,7 @@ async def create_irsaliye_from_invoice(invoice_id: str, issue_date: Optional[str
         }
     }
 
+    import datetime as _dt
+    with open("debug_shipment.log", "a", encoding="utf-8") as _f:
+        _f.write(f"[{_dt.datetime.now()}] parasut_attrs: {attrs}\n")
     return await _api_post("shipment_documents", payload)

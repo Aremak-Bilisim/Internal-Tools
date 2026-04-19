@@ -144,19 +144,6 @@ export default function OrderDetailPage() {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Beklenen Ödeme Tarihi">{beklenenTarih}</Descriptions.Item>
-              {invoice && (
-                <>
-                  <Descriptions.Item label="Fatura No">
-                    {invoice.invoice_no
-                      ? <a href={invoice.url} target="_blank" rel="noreferrer">{invoice.invoice_no} ↗</a>
-                      : <Tag color="orange">Onay Bekleniyor</Tag>}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Fatura Tarihi">{invoice.issue_date || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Fatura Tutarı">
-                    {invoice.gross_total ? `${Number(invoice.gross_total).toLocaleString('tr-TR')} ${invoice.currency}` : '-'}
-                  </Descriptions.Item>
-                </>
-              )}
             </Descriptions>
           </Card>
 
@@ -166,13 +153,11 @@ export default function OrderDetailPage() {
             {(shipment?.invoice_url || shipment?.invoice_no || invoice) ? (
               <>
                 <Descriptions column={2} size="small">
-                  {(shipment?.invoice_no || invoice?.invoice_no) && (
-                    <Descriptions.Item label="Fatura No">
-                      {invoice?.url
-                        ? <a href={invoice.url} target="_blank" rel="noreferrer">{shipment?.invoice_no || invoice.invoice_no} <ExportOutlined style={{ fontSize: 11 }} /></a>
-                        : (shipment?.invoice_no || invoice?.invoice_no)}
-                    </Descriptions.Item>
-                  )}
+                  <Descriptions.Item label="Fatura No">
+                    {(shipment?.invoice_no || invoice?.invoice_no)
+                      ? (shipment?.invoice_no || invoice.invoice_no)
+                      : <Tag color="orange">Onay Bekleniyor</Tag>}
+                  </Descriptions.Item>
                   {invoice?.issue_date && (
                     <Descriptions.Item label="Fatura Tarihi">{invoice.issue_date}</Descriptions.Item>
                   )}
@@ -181,17 +166,23 @@ export default function OrderDetailPage() {
                       {Number(invoice.gross_total).toLocaleString('tr-TR')} {invoice.currency}
                     </Descriptions.Item>
                   )}
-                  {shipment?.invoice_url && (
-                    <Descriptions.Item label="Paraşüt Bağlantısı" span={2}>
-                      <a href={shipment.invoice_url} target="_blank" rel="noreferrer">
-                        {shipment.invoice_url} <ExportOutlined style={{ fontSize: 11 }} />
-                      </a>
-                    </Descriptions.Item>
-                  )}
                   {shipment?.invoice_note && (
                     <Descriptions.Item label="Fatura Notu" span={2}>{shipment.invoice_note}</Descriptions.Item>
                   )}
                 </Descriptions>
+                {(invoice?.url || shipment?.invoice_url) && (
+                  <div style={{ marginTop: 12 }}>
+                    <Button
+                      icon={<ExportOutlined />}
+                      size="small"
+                      href={invoice?.url || shipment.invoice_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Paraşüt'te Görüntüle
+                    </Button>
+                  </div>
+                )}
                 {shipment && (
                   <div style={{ marginTop: 12 }}>
                     <Popconfirm
