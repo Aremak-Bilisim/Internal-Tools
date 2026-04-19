@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -5,6 +7,12 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
 from app.models.shipment import ShipmentRequest, ShipmentHistory
+from app.models.user import User
+from app.services import email as email_svc
+from app.services import teamgram
+from app.services import parasut
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -128,7 +136,42 @@ def create_shipment(
     db.add(s)
     db.commit()
     db.refresh(s)
-    return _shipment_to_dict(s)
+    result = _shipment_to_dict(s)
+
+    # Post-creation side effects (non-blocking failures)
+    _post_create_effects(db, result, data.tg_order_id)
+
+    return result
+
+
+def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]):
+    """Email notification + TeamGram update + Paraşüt irsaliye after shipment creation."""
+    # 1. Send email to all warehouse users
+    warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
+    for u in warehouse_users:
+        try:
+            email_svc.send_shipment_notification(shipment, u.email, u.name)
+        except Exception as e:
+            logger.error(f"Email to {u.email} failed: {e}")
+
+    # 2. Update TeamGram order: Status=1 (Tamamlandı), stage=Hazırlanıyor
+    if tg_order_id:
+        try:
+            asyncio.run(teamgram.update_order_status(tg_order_id, status=1, stage_name="Hazırlanıyor"))
+        except Exception as e:
+            logger.error(f"TeamGram status update failed: {e}")
+
+    # 3. Paraşüt irsaliye — only when shipping_doc_type includes İrsaliye
+    doc_type = shipment.get("shipping_doc_type") or ""
+    invoice_url = shipment.get("invoice_url") or ""
+    if "İrsaliye" in doc_type and invoice_url:
+        invoice_id = invoice_url.rstrip("/").split("/")[-1]
+        planned_date = shipment.get("planned_ship_date") or None
+        try:
+            asyncio.run(parasut.create_irsaliye_from_invoice(invoice_id, issue_date=planned_date))
+            logger.info(f"İrsaliye created for invoice {invoice_id}")
+        except Exception as e:
+            logger.error(f"Paraşüt irsaliye failed for invoice {invoice_id}: {e}")
 
 
 @router.get("/{shipment_id}")
@@ -185,6 +228,46 @@ def advance_stage(
     )
     db.add(history)
     db.commit()
+    db.refresh(s)
+    return _shipment_to_dict(s)
+
+
+@router.delete("/{shipment_id}/invoice")
+def delete_shipment_invoice(
+    shipment_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+
+    invoice_url = s.invoice_url or ""
+    invoice_id = invoice_url.rstrip("/").split("/")[-1] if invoice_url else None
+    tg_order_id = s.tg_order_id
+
+    # Clear invoice fields on shipment
+    s.invoice_url = None
+    s.invoice_no = None
+    s.invoice_note = None
+    db.commit()
+
+    # Non-blocking: delete from Paraşüt + clear TeamGram HasInvoice + refresh cache
+    if invoice_id and invoice_id.isdigit():
+        try:
+            asyncio.run(parasut.delete_invoice(invoice_id))
+        except Exception as e:
+            logger.warning(f"Paraşüt invoice delete failed for {invoice_id}: {e}")
+    try:
+        asyncio.run(parasut.invalidate_cache())
+    except Exception:
+        pass
+    if tg_order_id:
+        try:
+            asyncio.run(teamgram.clear_order_has_invoice(tg_order_id))
+        except Exception as e:
+            logger.warning(f"TeamGram HasInvoice clear failed for order {tg_order_id}: {e}")
+
     db.refresh(s)
     return _shipment_to_dict(s)
 

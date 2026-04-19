@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table } from 'antd'
-import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined } from '@ant-design/icons'
+import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm } from 'antd'
+import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
@@ -27,6 +27,7 @@ export default function ShipmentDetailPage() {
   const [shipment, setShipment] = useState(null)
   const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState(false)
+  const [deletingInvoice, setDeletingInvoice] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -45,6 +46,19 @@ export default function ShipmentDetailPage() {
       message.error(e.response?.data?.detail || 'Hata oluştu')
     } finally {
       setAdvancing(false)
+    }
+  }
+
+  const deleteInvoice = async () => {
+    setDeletingInvoice(true)
+    try {
+      await api.delete(`/shipments/${id}/invoice`)
+      message.success('Fatura silindi')
+      load()
+    } catch (e) {
+      message.error(e.response?.data?.detail || 'Fatura silinemedi')
+    } finally {
+      setDeletingInvoice(false)
     }
   }
 
@@ -132,6 +146,44 @@ export default function ShipmentDetailPage() {
                   </Button>
                 )}
               </div>
+            )}
+          </Card>
+
+          <Card title="Fatura Bilgileri" size="small" style={{ marginTop: 16 }}>
+            {shipment.invoice_url || shipment.invoice_no ? (
+              <>
+                <Descriptions column={1} size="small">
+                  {shipment.invoice_no && (
+                    <Descriptions.Item label="Fatura No">{shipment.invoice_no}</Descriptions.Item>
+                  )}
+                  {shipment.invoice_url && (
+                    <Descriptions.Item label="Paraşüt Bağlantısı">
+                      <a href={shipment.invoice_url} target="_blank" rel="noreferrer">
+                        {shipment.invoice_url} <ExportOutlined style={{ fontSize: 11 }} />
+                      </a>
+                    </Descriptions.Item>
+                  )}
+                  {shipment.invoice_note && (
+                    <Descriptions.Item label="Fatura Notu">{shipment.invoice_note}</Descriptions.Item>
+                  )}
+                </Descriptions>
+                <div style={{ marginTop: 12 }}>
+                  <Popconfirm
+                    title="Faturayı sil"
+                    description="Bu fatura Paraşüt'ten silinecek ve bu kayıttan kaldırılacak. Emin misiniz?"
+                    onConfirm={deleteInvoice}
+                    okText="Evet, Sil"
+                    cancelText="Vazgeç"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button danger icon={<DeleteOutlined />} loading={deletingInvoice}>
+                      Faturayı Sil
+                    </Button>
+                  </Popconfirm>
+                </div>
+              </>
+            ) : (
+              <Text type="secondary">Bu sevk talebi için fatura kaydı yok.</Text>
             )}
           </Card>
         </div>

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import {
-  Card, Descriptions, Tag, Button, Typography, Spin, Divider, Table, message,
+  Card, Descriptions, Tag, Button, Typography, Spin, Divider, Table, message, Popconfirm,
 } from 'antd'
-import { ArrowLeftOutlined, LinkOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import api from '../services/api'
 
@@ -27,6 +27,7 @@ export default function OrderDetailPage() {
   const [shipment, setShipment] = useState(null)
   const [invoice, setInvoice] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [deletingInvoice, setDeletingInvoice] = useState(false)
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -58,6 +59,21 @@ export default function OrderDetailPage() {
     }
     fetchAll()
   }, [id])
+
+  const deleteInvoice = async () => {
+    if (!shipment) return
+    setDeletingInvoice(true)
+    try {
+      const res = await api.delete(`/shipments/${shipment.id}/invoice`)
+      setShipment(res.data)
+      setInvoice(null)
+      message.success('Fatura silindi')
+    } catch (e) {
+      message.error(e.response?.data?.detail || 'Fatura silinemedi')
+    } finally {
+      setDeletingInvoice(false)
+    }
+  }
 
   const openTeamGram = async () => {
     try {
@@ -142,6 +158,60 @@ export default function OrderDetailPage() {
                 </>
               )}
             </Descriptions>
+          </Card>
+
+          {/* Fatura Bilgileri */}
+          <Card title="Fatura Bilgileri">
+
+            {(shipment?.invoice_url || shipment?.invoice_no || invoice) ? (
+              <>
+                <Descriptions column={2} size="small">
+                  {(shipment?.invoice_no || invoice?.invoice_no) && (
+                    <Descriptions.Item label="Fatura No">
+                      {invoice?.url
+                        ? <a href={invoice.url} target="_blank" rel="noreferrer">{shipment?.invoice_no || invoice.invoice_no} <ExportOutlined style={{ fontSize: 11 }} /></a>
+                        : (shipment?.invoice_no || invoice?.invoice_no)}
+                    </Descriptions.Item>
+                  )}
+                  {invoice?.issue_date && (
+                    <Descriptions.Item label="Fatura Tarihi">{invoice.issue_date}</Descriptions.Item>
+                  )}
+                  {invoice?.gross_total && (
+                    <Descriptions.Item label="Tutar">
+                      {Number(invoice.gross_total).toLocaleString('tr-TR')} {invoice.currency}
+                    </Descriptions.Item>
+                  )}
+                  {shipment?.invoice_url && (
+                    <Descriptions.Item label="Paraşüt Bağlantısı" span={2}>
+                      <a href={shipment.invoice_url} target="_blank" rel="noreferrer">
+                        {shipment.invoice_url} <ExportOutlined style={{ fontSize: 11 }} />
+                      </a>
+                    </Descriptions.Item>
+                  )}
+                  {shipment?.invoice_note && (
+                    <Descriptions.Item label="Fatura Notu" span={2}>{shipment.invoice_note}</Descriptions.Item>
+                  )}
+                </Descriptions>
+                {shipment && (
+                  <div style={{ marginTop: 12 }}>
+                    <Popconfirm
+                      title="Faturayı sil"
+                      description="Bu fatura Paraşüt'ten silinecek ve sevkiyat kaydından kaldırılacak. Emin misiniz?"
+                      onConfirm={deleteInvoice}
+                      okText="Evet, Sil"
+                      cancelText="Vazgeç"
+                      okButtonProps={{ danger: true }}
+                    >
+                      <Button danger icon={<DeleteOutlined />} loading={deletingInvoice}>
+                        Faturayı Sil
+                      </Button>
+                    </Popconfirm>
+                  </div>
+                )}
+              </>
+            ) : (
+              <Typography.Text type="secondary">Bu sipariş için fatura kaydı yok.</Typography.Text>
+            )}
           </Card>
 
           {/* Kalemler */}

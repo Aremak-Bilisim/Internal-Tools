@@ -84,6 +84,8 @@ def _normalize(name: str) -> str:
     import re
     if not name:
         return ""
+    # Replace Turkish İ before .lower() to avoid i+combining-dot-above (U+0307)
+    name = name.replace('İ', 'i').replace('I', 'ı')
     return re.sub(r'\s+', ' ', name.strip().lower())
 
 
@@ -111,7 +113,6 @@ async def _fetch_all_invoices() -> list:
                 "sort": "-issue_date",
                 "page[number]": page,
                 "page[size]": 25,
-                "filter[item_type]": "invoice",
             },
         )
         items = data.get("data", [])
@@ -123,14 +124,17 @@ async def _fetch_all_invoices() -> list:
             attrs = inv.get("attributes", {})
             contact_rel = inv.get("relationships", {}).get("contact", {}).get("data")
             contact_name = ""
+            contact_tax_number = ""
             if contact_rel:
                 key = f"{contact_rel['type']}/{contact_rel['id']}"
                 contact_obj = included.get(key, {})
                 contact_attrs = contact_obj.get("attributes", {})
                 contact_name = contact_attrs.get("name", "") or contact_attrs.get("short_name", "")
+                contact_tax_number = contact_attrs.get("tax_number", "") or ""
 
             all_invoices.append({
                 "id": inv["id"],
+                "description": attrs.get("description", "") or "",
                 "invoice_no": attrs.get("invoice_no") or attrs.get("invoice_id", ""),
                 "issue_date": attrs.get("issue_date", ""),
                 "net_total": attrs.get("net_total", ""),
@@ -138,6 +142,7 @@ async def _fetch_all_invoices() -> list:
                 "currency": attrs.get("currency", "TRL"),
                 "contact_name": contact_name,
                 "contact_name_normalized": _normalize(contact_name),
+                "contact_tax_number": contact_tax_number,
                 "url": f"https://uygulama.parasut.com/{COMPANY}/satislar/{inv['id']}",
             })
 
@@ -198,3 +203,112 @@ async def get_invoice_pdf_url(invoice_id: str) -> Optional[str]:
 
 async def invalidate_cache():
     _invoice_cache.clear()
+
+
+WAREHOUSE_ID = "1000081985"  # Ana Depo
+
+
+async def _api_patch(path: str, payload: dict) -> dict:
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.patch(
+            f"{BASE}/v4/{COMPANY}/{path}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/vnd.api+json"},
+            json=payload,
+        )
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
+async def _api_post(path: str, payload: dict) -> dict:
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            f"{BASE}/v4/{COMPANY}/{path}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/vnd.api+json"},
+            json=payload,
+        )
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
+async def delete_invoice(invoice_id: str) -> bool:
+    """Delete (cancel/void) a sales invoice from Paraşüt."""
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.delete(
+            f"{BASE}/v4/{COMPANY}/sales_invoices/{invoice_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    return r.status_code < 300
+
+
+async def create_irsaliye_from_invoice(invoice_id: str, issue_date: Optional[str] = None) -> dict:
+    """
+    1. Fetch invoice to get contact + line items with products.
+    2. PATCH invoice to set shipment_included=false (stok çıkışı yapılmasın).
+    3. POST shipment_document linked to invoice with stock_movements.
+    """
+    import datetime
+
+    if not issue_date:
+        issue_date = datetime.date.today().isoformat()
+
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{BASE}/v4/{COMPANY}/sales_invoices/{invoice_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"include": "contact,details,details.product"},
+        )
+        r.raise_for_status()
+        data = r.json()
+
+    inv = data["data"]
+    contact_id = inv["relationships"]["contact"]["data"]["id"]
+    included = {f"{i['type']}/{i['id']}": i for i in data.get("included", [])}
+
+    # Step 1: set shipment_included=false on invoice (stok çıkışı yapılmasın)
+    if inv["attributes"].get("shipment_included") is not False:
+        try:
+            await _api_patch(
+                f"sales_invoices/{invoice_id}",
+                {"data": {"id": str(invoice_id), "type": "sales_invoices", "attributes": {"shipment_included": False}}},
+            )
+        except Exception:
+            pass  # May fail on e-signed invoices; continue anyway
+
+    # Step 2: build stock movements from invoice details
+    stock_movements = []
+    for d_ref in inv["relationships"].get("details", {}).get("data", []):
+        d = included.get(f"{d_ref['type']}/{d_ref['id']}", {})
+        d_attrs = d.get("attributes", {})
+        qty = float(d_attrs.get("quantity") or 0)
+        if qty <= 0:
+            continue
+        prod_data = d.get("relationships", {}).get("product", {}).get("data")
+        if not prod_data:
+            continue
+        stock_movements.append({
+            "type": "stock_movements",
+            "attributes": {"quantity": qty, "inflow": False, "date": issue_date},
+            "relationships": {
+                "product": {"data": {"type": "products", "id": prod_data["id"]}},
+                "warehouse": {"data": {"type": "warehouses", "id": WAREHOUSE_ID}},
+            },
+        })
+
+    # Step 3: create shipment document
+    payload = {
+        "data": {
+            "type": "shipment_documents",
+            "attributes": {"inflow": False, "issue_date": issue_date},
+            "relationships": {
+                "contact": {"data": {"type": "contacts", "id": contact_id}},
+                "invoices": {"data": [{"type": "sales_invoices", "id": str(invoice_id)}]},
+                "stock_movements": {"data": stock_movements},
+            },
+        }
+    }
+
+    return await _api_post("shipment_documents", payload)

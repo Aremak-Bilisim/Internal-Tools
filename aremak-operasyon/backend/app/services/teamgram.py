@@ -152,8 +152,65 @@ async def update_order_custom_fields(order_id: int, field_updates: dict) -> bool
     url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(url, headers=HEADERS, json=order)
-        result = r.json()
-    return result.get("Result") is True
+    if r.content:
+        try:
+            return r.json().get("Result") is True
+        except Exception:
+            pass
+    return r.status_code < 300
+
+
+async def update_order_status(order_id: int, status: int, stage_name: Optional[str] = None) -> bool:
+    """
+    Update TeamGram order Status (0=Açık, 1=Tamamlandı, 2=İptal).
+    Optionally also set the pipeline stage by display name (e.g. "Hazırlanıyor").
+    """
+    order = await get_order(order_id)
+    order["RelatedEntityId"] = order.get("RelatedEntity", {}).get("Id")
+    order["Status"] = status
+
+    if stage_name:
+        # Find matching pipeline stage ID by name
+        stage_id = await _find_stage_id(stage_name)
+        if stage_id:
+            order["CustomStageId"] = stage_id
+
+    url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json=order)
+    if r.content:
+        try:
+            return r.json().get("Result") is True
+        except Exception:
+            pass
+    return r.status_code < 300
+
+
+async def _find_stage_id(stage_name: str) -> Optional[int]:
+    """Look up pipeline stage ID by name. Returns None if not found."""
+    try:
+        data = await _get(f"{DOMAIN}/PipelineStages/GetAll")
+        stages = data if isinstance(data, list) else data.get("List", data.get("Items", []))
+        for s in stages:
+            if (s.get("Name") or s.get("StageName") or "").strip() == stage_name:
+                return s.get("Id") or s.get("StageId")
+    except Exception:
+        pass
+    return None
+
+
+async def clear_order_has_invoice(order_id: int) -> bool:
+    """Attempt to set HasInvoice=False on a TeamGram order (best-effort)."""
+    try:
+        order = await get_order(order_id)
+        order["RelatedEntityId"] = order.get("RelatedEntity", {}).get("Id")
+        order["HasInvoice"] = False
+        url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(url, headers=HEADERS, json=order)
+    except Exception:
+        pass
+    return True  # best-effort; TeamGram may ignore this field
 
 
 async def get_order_weblink(order_id: int) -> str:

@@ -23,7 +23,10 @@ export default function OrdersPage() {
   const [data, setData] = useState({ List: [], OrderCount: 0 })
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
-  const [invoiceMap, setInvoiceMap] = useState({})
+  const [invoiceMap, setInvoiceMap] = useState({})          // normalized_name → invoice
+  const [invoiceTaxMap, setInvoiceTaxMap] = useState({})   // tax_number → invoice
+  const [invoiceDescMap, setInvoiceDescMap] = useState({}) // description → invoice
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false)
   const [orderInvoiceMap, setOrderInvoiceMap] = useState({})
   const [pdfLoading, setPdfLoading] = useState({})
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -31,6 +34,7 @@ export default function OrdersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [paymentFile, setPaymentFile] = useState(null)  // {file, uploading, url}
+  const [drawerItems, setDrawerItems] = useState([])
   const [users, setUsers] = useState([])
   const [shipmentOrderIds, setShipmentOrderIds] = useState(new Set())
   const [form] = Form.useForm()
@@ -43,18 +47,49 @@ export default function OrdersPage() {
       form.setFieldValue('cargo_company', 'Yurtiçi Kargo')
     }
   }, [teslimSekli, form])
+  const [invoiceRefreshing, setInvoiceRefreshing] = useState(false)
+
+  const buildInvoiceMaps = (invoices) => {
+
+    const nameMap = {}
+    const taxMap = {}
+    const descMap = {}
+    for (const inv of invoices) {
+      const nameKey = inv.contact_name_normalized
+      if (nameKey && (!nameMap[nameKey] || inv.issue_date > nameMap[nameKey].issue_date))
+        nameMap[nameKey] = inv
+      const taxKey = (inv.contact_tax_number || '').trim()
+      if (taxKey && (!taxMap[taxKey] || inv.issue_date > taxMap[taxKey].issue_date))
+        taxMap[taxKey] = inv
+      const desc = (inv.description || '').trim()
+      if (desc) descMap[desc] = inv
+    }
+
+    setInvoiceMap(nameMap)
+    setInvoiceTaxMap(taxMap)
+    setInvoiceDescMap(descMap)
+    setInvoicesLoaded(true)
+  }
+
   const loadInvoices = useCallback(async () => {
     try {
       const res = await api.get('/parasut/invoices')
-      const map = {}
-      for (const inv of res.data.invoices) {
-        const key = inv.contact_name_normalized
-        if (!key) continue
-        if (!map[key] || inv.issue_date > map[key].issue_date) map[key] = inv
-      }
-      setInvoiceMap(map)
+      buildInvoiceMaps(res.data.invoices)
     } catch {}
   }, [])
+
+  const refreshInvoices = async () => {
+    setInvoiceRefreshing(true)
+    try {
+      const res = await api.post('/parasut/invoices/refresh')
+      buildInvoiceMaps(res.data.invoices)
+      message.success('Faturalar güncellendi')
+    } catch {
+      message.error('Faturalar yüklenemedi')
+    } finally {
+      setInvoiceRefreshing(false)
+    }
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -95,7 +130,8 @@ export default function OrdersPage() {
 
   useEffect(() => {
     const orders = data.List || []
-    if (!orders.length || !Object.keys(invoiceMap).length) { setOrderInvoiceMap({}); return }
+    const hasInvoiceData = Object.keys(invoiceMap).length || Object.keys(invoiceTaxMap).length
+    if (!orders.length || !hasInvoiceData) { setOrderInvoiceMap({}); return }
 
     const toTRL = (amount, currency, rates) => {
       if (!currency || currency === 'TRL' || currency === 'TRY') return amount
@@ -115,9 +151,28 @@ export default function OrdersPage() {
         return rateCache[dateStr]
       }
 
+      // 1. Description-based matching (primary — Paraşüt description = TG order name)
+      for (const order of orders) {
+        const displayname = (order.Displayname || '').trim()
+        if (displayname && invoiceDescMap[displayname]) {
+          result[order.Id] = invoiceDescMap[displayname]
+        }
+      }
+
+      // 2. Tax-number based matching (fallback)
+      for (const order of orders) {
+        if (result[order.Id]) continue
+        const taxNo = (order.RelatedEntity?.TaxNumber || '').trim()
+        if (taxNo && invoiceTaxMap[taxNo]) {
+          result[order.Id] = invoiceTaxMap[taxNo]
+        }
+      }
+
+      // 3. Name-based matching (last fallback)
       for (const [nameKey, invoice] of Object.entries(invoiceMap)) {
         const prefix = nameKey.slice(0, 20)
         const matches = orders.filter((order) => {
+          if (result[order.Id]) return false  // already matched by tax number
           const name = order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || ''
           const key = normalize(name)
           return key === nameKey || key.includes(prefix) || nameKey.includes(key.slice(0, 20))
@@ -147,7 +202,7 @@ export default function OrdersPage() {
 
       setOrderInvoiceMap(result)
     })()
-  }, [data.List, invoiceMap])
+  }, [data.List, invoiceMap, invoiceTaxMap, invoiceDescMap])
 
   const findInvoice = (r) => orderInvoiceMap[r.Id] || null
 
@@ -168,10 +223,11 @@ export default function OrdersPage() {
 
   const openShipmentDrawer = async (order) => {
     const customerName = order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || ''
-    const gulAtes = users.find((u) => u.email === 'gulates@aremak.com.tr')
+    const gulAtes = users.find((u) => u.role === 'warehouse')
     setDrawerOrder(order)
     setDrawerOpen(true)
     setDrawerLoading(true)
+    setDrawerItems([])
     form.resetFields()
     form.setFieldsValue({
       customer_name: customerName,
@@ -184,6 +240,11 @@ export default function OrdersPage() {
       const res = await api.get(`/orders/${order.Id}`)
       const o = res.data
       const addr = o.DeliveryAddress?.replace(/\r\n/g, '\n').trim() || ''
+      setDrawerItems((o.Items || []).map((item) => ({
+        product_name: item.Product?.Displayname || item.Title || '',
+        quantity: item.Quantity || 0,
+        shelf: '',
+      })))
 
       // Parse payment custom fields
       const cfds = o.CustomFieldDatas || []
@@ -226,7 +287,7 @@ export default function OrdersPage() {
       }
       setSubmitting(true)
       const inv = findInvoice(drawerOrder)
-      await api.post('/shipments', {
+      const shipmentRes = await api.post('/shipments', {
         tg_order_id: drawerOrder.Id,
         tg_order_name: drawerOrder.Displayname,
         customer_name: values.customer_name,
@@ -241,9 +302,9 @@ export default function OrdersPage() {
         recipient_phone: values.recipient_phone || null,
         planned_ship_date: values.planned_ship_date ? values.planned_ship_date.format('YYYY-MM-DD') : null,
         shipping_doc_type: values.shipping_doc_type || null,
-        invoice_note: values.invoice_note || null,
         waybill_note: values.waybill_note || null,
         assigned_to_id: values.assigned_to_id || null,
+        items: drawerItems,
       })
       // Upload payment document if provided
       if (paymentFile?.file && values.odeme_durumu === 'Ödendi') {
@@ -270,13 +331,16 @@ export default function OrdersPage() {
         cfUpdates['193502'] = values.beklenen_odeme_tarihi.format('YYYY-MM-DD')
       }
       if (Object.keys(cfUpdates).length) {
-        await api.put(`/orders/${drawerOrder.Id}/custom-fields`, { fields: cfUpdates })
+        try {
+          await api.put(`/orders/${drawerOrder.Id}/custom-fields`, { fields: cfUpdates })
+        } catch {}
       }
 
       setShipmentOrderIds((prev) => new Set([...prev, drawerOrder.Id]))
       message.success('Sevk talebi oluşturuldu')
       setDrawerOpen(false)
       form.resetFields()
+      navigate(`/shipments/${shipmentRes.data.id}`)
     } catch (err) {
       if (err?.errorFields) return
       message.error('Sevk talebi oluşturulamadı')
@@ -399,7 +463,7 @@ export default function OrdersPage() {
         { text: 'Yok', value: 'yok' },
       ],
       onFilter: (value, r) => {
-        const hasInv = !!(findInvoice(r) || r.HasInvoice)
+        const hasInv = !!(findInvoice(r) || (r.HasInvoice && !invoicesLoaded))
         return value === 'var' ? hasInv : !hasInv
       },
       render: (_, r) => {
@@ -430,19 +494,8 @@ export default function OrdersPage() {
             </div>
           )
         }
-        if (r.HasInvoice) {
-          return (
-            <Tag
-              color="orange"
-              style={{ cursor: 'pointer' }}
-              onClick={async () => {
-                const res = await api.get(`/orders/${r.Id}/weblink`)
-                window.open(res.data.url, '_blank')
-              }}
-            >
-              Var ↗
-            </Tag>
-          )
+        if (r.HasInvoice && !invoicesLoaded) {
+          return <Tag color="orange">Var ↗</Tag>
         }
         return <Tag color="default">Yok</Tag>
       },
@@ -485,7 +538,8 @@ export default function OrdersPage() {
             <Button
               icon={<ReloadOutlined />}
               size="small"
-              onClick={async () => { await api.post('/parasut/invoices/refresh'); loadInvoices() }}
+              loading={invoiceRefreshing}
+              onClick={refreshInvoices}
             />
           </Tooltip>
           <Segmented

@@ -60,3 +60,11 @@ async def update_custom_fields(
 async def get_order_weblink(order_id: int, current_user=Depends(get_current_user)):
     url = await teamgram.get_order_weblink(order_id)
     return {"url": url}
+
+
+@router.post("/{order_id}/clear-invoice-flag")
+async def clear_invoice_flag(order_id: int, current_user=Depends(get_current_user)):
+    ok = await teamgram.clear_order_has_invoice(order_id)
+    if not ok:
+        raise HTTPException(status_code=502, detail="TeamGram güncellenemedi")
+    return {"ok": True}

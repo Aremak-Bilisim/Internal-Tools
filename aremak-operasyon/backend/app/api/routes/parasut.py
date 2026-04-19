@@ -24,3 +24,23 @@ async def refresh_invoices(current_user=Depends(get_current_user)):
     await parasut.invalidate_cache()
     invoices = await parasut.get_invoices()
     return {"invoices": invoices, "count": len(invoices)}
+
+
+@router.get("/invoices/debug")
+async def debug_invoices(current_user=Depends(get_current_user)):
+    """Returns raw Paraşüt invoice list for debugging."""
+    await parasut.invalidate_cache()
+    invoices = await parasut.get_invoices()
+    return {
+        "count": len(invoices),
+        "invoices": [
+            {
+                "id": inv["id"],
+                "invoice_no": inv["invoice_no"],
+                "contact_name": inv["contact_name"],
+                "contact_tax_number": inv.get("contact_tax_number", ""),
+                "issue_date": inv["issue_date"],
+            }
+            for inv in invoices[:20]
+        ]
+    }
