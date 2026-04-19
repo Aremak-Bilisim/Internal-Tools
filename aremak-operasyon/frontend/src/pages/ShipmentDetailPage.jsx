@@ -1,23 +1,31 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm } from 'antd'
-import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined, FilePdfOutlined, ShoppingOutlined } from '@ant-design/icons'
+import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, Upload, Image } from 'antd'
+import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined, FilePdfOutlined, ShoppingOutlined, UploadOutlined, PaperClipOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 
 const { Title, Text } = Typography
+const { TextArea } = Input
 
 const STAGE_COLORS = {
-  draft: 'default', pending_admin: 'orange', preparing: 'blue',
-  pending_waybill_approval: 'purple', ready_to_ship: 'cyan', shipped: 'green',
+  pending_admin: 'orange', parasut_review: 'blue',
+  pending_parasut_approval: 'purple', preparing: 'cyan', shipped: 'green',
+}
+
+const STAGE_LABELS = {
+  pending_admin: 'Yönetici Onayı Bekleniyor',
+  parasut_review: 'Paraşüt Kontrolü Yapılıyor',
+  pending_parasut_approval: 'Paraşüt Onayı Bekleniyor',
+  preparing: 'Sevk İçin Hazırlanıyor',
+  shipped: 'Sevk Edildi',
 }
 
 const ADVANCE_LABELS = {
-  draft: 'Onaya Gönder',
-  pending_admin: 'Onayla (Hazırlamaya Gönder)',
-  preparing: 'İrsaliye Onayına Gönder',
-  pending_waybill_approval: 'Onayla (Sevke Hazır)',
-  ready_to_ship: 'Sevk Edildi Olarak İşaretle',
+  pending_admin: 'Onayla (Sevk Sorumlusuna Gönder)',
+  parasut_review: 'Paraşüt Onayı Talep Et',
+  pending_parasut_approval: 'Paraşüt Belgelerini Onayla',
+  preparing: 'Sevk Edildi Olarak İşaretle',
 }
 
 export default function ShipmentDetailPage() {
@@ -28,6 +36,10 @@ export default function ShipmentDetailPage() {
   const [order, setOrder] = useState(null)
   const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState(false)
+  const [noteModal, setNoteModal] = useState(null) // 'advance' | 'reject' | null
+  const [noteText, setNoteText] = useState('')
+  const [uploadingPdf, setUploadingPdf] = useState(false)
+  const [uploadingPhotos, setUploadingPhotos] = useState(false)
   const [deletingInvoice, setDeletingInvoice] = useState(false)
   const [invoicePdfLoading, setInvoicePdfLoading] = useState(false)
   const [invoiceDetails, setInvoiceDetails] = useState(null)
@@ -64,16 +76,65 @@ export default function ShipmentDetailPage() {
 
   useEffect(() => { load() }, [id])
 
-  const advance = async () => {
+  const openNoteModal = (type) => {
+    setNoteText('')
+    setNoteModal(type)
+  }
+
+  const submitWithNote = async () => {
     setAdvancing(true)
+    setNoteModal(null)
     try {
-      await api.post(`/shipments/${id}/advance`, {})
-      message.success('Aşama güncellendi')
+      if (noteModal === 'advance') {
+        await api.post(`/shipments/${id}/advance`, { note: noteText || undefined })
+        message.success('Aşama güncellendi')
+      } else {
+        await api.post(`/shipments/${id}/reject`, { note: noteText || 'Reddedildi' })
+        message.warning('Talep reddedildi')
+      }
       load()
     } catch (e) {
       message.error(e.response?.data?.detail || 'Hata oluştu')
     } finally {
       setAdvancing(false)
+    }
+  }
+
+  const uploadCargoPdf = async ({ file, onSuccess, onError }) => {
+    setUploadingPdf(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await api.post(`/shipments/${id}/upload/cargo-pdf`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setShipment(res.data)
+      message.success('Kargo fişi yüklendi')
+      onSuccess(res.data)
+    } catch (e) {
+      message.error('Yükleme başarısız')
+      onError(e)
+    } finally {
+      setUploadingPdf(false)
+    }
+  }
+
+  const uploadCargoPhotos = async ({ file, onSuccess, onError }) => {
+    setUploadingPhotos(true)
+    try {
+      const form = new FormData()
+      form.append('files', file)
+      const res = await api.post(`/shipments/${id}/upload/cargo-photos`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setShipment(res.data)
+      message.success('Fotoğraf yüklendi')
+      onSuccess(res.data)
+    } catch (e) {
+      message.error('Yükleme başarısız')
+      onError(e)
+    } finally {
+      setUploadingPhotos(false)
     }
   }
 
@@ -90,18 +151,6 @@ export default function ShipmentDetailPage() {
     }
   }
 
-  const reject = async () => {
-    setAdvancing(true)
-    try {
-      await api.post(`/shipments/${id}/reject`, { note: 'Reddedildi' })
-      message.warning('Talep reddedildi')
-      load()
-    } catch (e) {
-      message.error(e.response?.data?.detail || 'Hata oluştu')
-    } finally {
-      setAdvancing(false)
-    }
-  }
 
   const openInvoicePdf = async () => {
     const invId = shipment?.invoice_url?.split('/').pop()
@@ -133,8 +182,17 @@ export default function ShipmentDetailPage() {
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '80px auto' }} />
   if (!shipment) return <div>Bulunamadı</div>
 
-  const canAdvance = ADVANCE_LABELS[shipment.stage]
-  const canReject = user?.role === 'admin' && ['pending_admin', 'pending_waybill_approval'].includes(shipment.stage)
+  const STAGE_ALLOWED_ROLES = {
+    pending_admin:            ['admin'],
+    parasut_review:           ['warehouse'],
+    pending_parasut_approval: ['admin'],
+    preparing:                ['warehouse'],
+  }
+  const isPreparingStage = shipment.stage === 'preparing' && user?.role === 'warehouse'
+  const canShip = isPreparingStage && !!shipment.cargo_pdf_url
+  const canAdvance = ADVANCE_LABELS[shipment.stage] && STAGE_ALLOWED_ROLES[shipment.stage]?.includes(user?.role)
+    && (shipment.stage !== 'preparing' || canShip)
+  const canReject = user?.role === 'admin' && ['pending_admin', 'pending_parasut_approval'].includes(shipment.stage)
   const isKargo = shipment.delivery_type === 'Kargo'
 
   const itemColumns = [
@@ -157,7 +215,7 @@ export default function ShipmentDetailPage() {
             title={
               <Space>
                 <span>Sevk Talebi #{shipment.id}</span>
-                <Tag color={STAGE_COLORS[shipment.stage]}>{shipment.stage_label}</Tag>
+                <Tag color={STAGE_COLORS[shipment.stage]}>{STAGE_LABELS[shipment.stage] || shipment.stage_label}</Tag>
               </Space>
             }
           >
@@ -169,16 +227,17 @@ export default function ShipmentDetailPage() {
 
               <Descriptions.Item label="Gönderim Belgesi">{shipment.shipping_doc_type || '-'}</Descriptions.Item>
               <Descriptions.Item label="Oluşturan">{shipment.created_by?.name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Sevk Sorumlusu">{shipment.assigned_to?.name || '-'}</Descriptions.Item>
 
               {isKargo && <>
                 <Descriptions.Item label="Kargo Firması">{shipment.cargo_company || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Kargo Takip">{shipment.cargo_tracking_no || '-'}</Descriptions.Item>
+                <Descriptions.Item label="Alıcı">{shipment.recipient_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="Alıcı Telefonu">{shipment.recipient_phone || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Teslimat Adresi" span={2}>
                   {[shipment.delivery_address, shipment.delivery_district, shipment.delivery_city, shipment.delivery_zip]
                     .filter(Boolean).join(', ') || '-'}
                 </Descriptions.Item>
-                <Descriptions.Item label="Alıcı">{shipment.recipient_name || '-'}</Descriptions.Item>
-                <Descriptions.Item label="Alıcı Telefonu">{shipment.recipient_phone || '-'}</Descriptions.Item>
               </>}
 
               {shipment.notes && (
@@ -200,21 +259,151 @@ export default function ShipmentDetailPage() {
               </div>
             )}
 
-            {(canAdvance || canReject) && (
+            {/* Sevke hazırlık: kargo fişi + fotoğraf yükleme */}
+            {isPreparingStage && (
+              <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 8, padding: 16 }}>
+                  <Text strong style={{ display: 'block', marginBottom: 12 }}>Sevk Öncesi Belgeler</Text>
+
+                  {/* Kargo Fişi PDF */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text style={{ display: 'block', marginBottom: 6 }}>
+                      Kargo Fişi (PDF) <Text type="danger">*</Text>
+                    </Text>
+                    {shipment.cargo_pdf_url ? (
+                      <Space>
+                        <Tag color="green" icon={<PaperClipOutlined />}>
+                          <a href={`http://localhost:8000${shipment.cargo_pdf_url}`} target="_blank" rel="noreferrer">
+                            Kargo Fişi Yüklendi
+                          </a>
+                        </Tag>
+                        <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
+                          <Button size="small">Değiştir</Button>
+                        </Upload>
+                      </Space>
+                    ) : (
+                      <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
+                        <Button icon={<UploadOutlined />} loading={uploadingPdf}>PDF Yükle</Button>
+                      </Upload>
+                    )}
+                  </div>
+
+                  {/* Fotoğraflar */}
+                  <div>
+                    <Text style={{ display: 'block', marginBottom: 6 }}>Sipariş Fotoğrafları</Text>
+                    <Space wrap>
+                      {(shipment.cargo_photo_urls || []).map((url, i) => (
+                        <Image
+                          key={i}
+                          src={`http://localhost:8000${url}`}
+                          width={72}
+                          height={72}
+                          style={{ objectFit: 'cover', borderRadius: 4 }}
+                        />
+                      ))}
+                      <Upload customRequest={uploadCargoPhotos} showUploadList={false} accept="image/*" multiple>
+                        <Button icon={<UploadOutlined />} loading={uploadingPhotos} size="small">Fotoğraf Ekle</Button>
+                      </Upload>
+                    </Space>
+                  </div>
+                </div>
+
+                {!canShip && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    ⚠ Sevk edildi olarak işaretlemek için kargo fişini yükleyin.
+                  </Text>
+                )}
+              </div>
+            )}
+
+            {(canAdvance || canReject || isPreparingStage) && (
               <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
                 {canAdvance && (
-                  <Button type="primary" icon={<CheckOutlined />} onClick={advance} loading={advancing}>
+                  <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
                     {ADVANCE_LABELS[shipment.stage]}
                   </Button>
                 )}
                 {canReject && (
-                  <Button danger icon={<RollbackOutlined />} onClick={reject} loading={advancing}>
+                  <Button danger icon={<RollbackOutlined />} onClick={() => openNoteModal('reject')} loading={advancing}>
                     Reddet
                   </Button>
                 )}
               </div>
             )}
+
+            <Modal
+              title={noteModal === 'reject' ? 'Reddet — Not Ekle' : `${ADVANCE_LABELS[shipment?.stage] || 'Onayla'} — Not Ekle`}
+              open={!!noteModal}
+              onOk={submitWithNote}
+              onCancel={() => setNoteModal(null)}
+              okText={noteModal === 'reject' ? 'Reddet' : 'Onayla'}
+              okButtonProps={{ danger: noteModal === 'reject' }}
+              cancelText="Vazgeç"
+            >
+              <TextArea
+                rows={3}
+                placeholder={(() => {
+                  if (noteModal === 'reject') return 'İsteğe bağlı not (sevk sorumlusuna görünür)'
+                  const adminStages = ['draft', 'parasut_review']   // advance → admin okur
+                  const warehouseStages = ['pending_admin', 'pending_parasut_approval'] // advance → sevk sorumlusu okur
+                  if (adminStages.includes(shipment?.stage)) return 'İsteğe bağlı not (yöneticiye görünür)'
+                  if (warehouseStages.includes(shipment?.stage)) return 'İsteğe bağlı not (sevk sorumlusuna görünür)'
+                  return 'İsteğe bağlı not'
+                })()}
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                autoFocus
+              />
+            </Modal>
           </Card>
+
+          {/* Sevk Belgeleri — sadece shipped aşamasında */}
+          {shipment.stage === 'shipped' && (shipment.cargo_pdf_url || shipment.cargo_photo_urls?.length > 0 || shipment.history?.some(h => h.stage_to === 'shipped')) && (
+            <Card title="Sevk Belgeleri" size="small">
+              <Descriptions column={2} size="small">
+                {(() => {
+                  const shippedEntry = shipment.history?.find(h => h.stage_to === 'shipped')
+                  return shippedEntry ? (
+                    <Descriptions.Item label="Sevk Tamamlanma Tarihi" span={2}>
+                      {shippedEntry.created_at ? new Date(shippedEntry.created_at + (shippedEntry.created_at.endsWith('Z') ? '' : 'Z')).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                    </Descriptions.Item>
+                  ) : null
+                })()}
+                {shipment.cargo_pdf_url && (
+                  <Descriptions.Item label="Kargo Fişi" span={2}>
+                    <Button
+                      icon={<FilePdfOutlined />}
+                      size="small"
+                      href={`http://localhost:8000${shipment.cargo_pdf_url}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
+                    >
+                      Kargo Fişi (PDF)
+                    </Button>
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+              {shipment.cargo_photo_urls?.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>Sevk Fotoğrafları</Text>
+                  <Image.PreviewGroup>
+                    <Space wrap>
+                      {shipment.cargo_photo_urls.map((url, i) => (
+                        <Image
+                          key={i}
+                          src={`http://localhost:8000${url}`}
+                          width={80}
+                          height={80}
+                          style={{ objectFit: 'cover', borderRadius: 4 }}
+                        />
+                      ))}
+                    </Space>
+                  </Image.PreviewGroup>
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Sipariş Özeti */}
           {shipment.tg_order_id && (
@@ -294,18 +483,6 @@ export default function ShipmentDetailPage() {
                   >
                     Paraşüt'te Görüntüle
                   </Button>
-                  <Popconfirm
-                    title="Faturayı sil"
-                    description="Bu fatura Paraşüt'ten silinecek ve bu kayıttan kaldırılacak. Emin misiniz?"
-                    onConfirm={deleteInvoice}
-                    okText="Evet, Sil"
-                    cancelText="Vazgeç"
-                    okButtonProps={{ danger: true }}
-                  >
-                    <Button danger icon={<DeleteOutlined />} size="small" loading={deletingInvoice}>
-                      Faturayı Sil
-                    </Button>
-                  </Popconfirm>
                 </div>
               </>
             ) : (
@@ -364,18 +541,29 @@ export default function ShipmentDetailPage() {
         <div style={{ width: 280 }}>
           <Card title="Geçmiş" size="small">
             <Timeline
-              items={(shipment.history || []).map((h) => ({
-                color: h.note?.startsWith('[RED]') ? 'red' : 'blue',
-                children: (
-                  <div>
-                    <Text strong style={{ fontSize: 12 }}>{h.user}</Text>
-                    <br />
-                    <Text type="secondary" style={{ fontSize: 11 }}>{h.stage_from} → {h.stage_to}</Text>
-                    {h.note && <div style={{ fontSize: 11, color: '#666' }}>{h.note.replace('[RED] ', '')}</div>}
-                    <div style={{ fontSize: 10, color: '#999' }}>{h.created_at?.slice(0, 16)}</div>
-                  </div>
-                ),
-              }))}
+              items={(shipment.history || []).map((h) => {
+                const isCreated = h.note?.startsWith('[CREATED]')
+                const isRejected = h.note?.startsWith('[RED]')
+                const noteText = h.note?.replace('[CREATED]', '').replace('[RED]', '').trim()
+                const localTime = h.created_at
+                  ? new Date(h.created_at + (h.created_at.endsWith('Z') ? '' : 'Z')).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })
+                  : ''
+                return {
+                  color: isCreated ? 'green' : isRejected ? 'red' : 'blue',
+                  children: (
+                    <div>
+                      <Text strong style={{ fontSize: 12 }}>{h.user}</Text>
+                      <br />
+                      {isCreated
+                        ? <Text type="secondary" style={{ fontSize: 11 }}>Sevk talebi oluşturuldu</Text>
+                        : <Text type="secondary" style={{ fontSize: 11 }}>{STAGE_LABELS[h.stage_from] || h.stage_from} → {STAGE_LABELS[h.stage_to] || h.stage_to}</Text>
+                      }
+                      {noteText && <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{noteText}</div>}
+                      <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>{localTime}</div>
+                    </div>
+                  ),
+                }
+              })}
             />
           </Card>
         </div>

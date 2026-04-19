@@ -53,6 +53,7 @@ class ShipmentRequest(Base):
 
     # File uploads
     cargo_photo_urls = Column(JSON, default=list)
+    cargo_pdf_url = Column(String)          # kargo fişi PDF
     cargo_tracking_no = Column(String)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

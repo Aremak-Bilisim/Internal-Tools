@@ -187,13 +187,14 @@ async def update_order_status(order_id: int, status: int, stage_name: Optional[s
 
 
 async def _find_stage_id(stage_name: str) -> Optional[int]:
-    """Look up pipeline stage ID by name. Returns None if not found."""
+    """Look up order pipeline stage ID by name from metadata CustomStagesOrder."""
     try:
-        data = await _get(f"{DOMAIN}/PipelineStages/GetAll")
-        stages = data if isinstance(data, list) else data.get("List", data.get("Items", []))
+        meta = await get_metadata()
+        stages = meta.get("CustomStagesOrder", [])
+        name_lower = stage_name.strip().lower()
         for s in stages:
-            if (s.get("Name") or s.get("StageName") or "").strip() == stage_name:
-                return s.get("Id") or s.get("StageId")
+            if (s.get("Name") or "").strip().lower() == name_lower:
+                return s.get("Id")
     except Exception:
         pass
     return None

@@ -22,12 +22,12 @@ const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }
 const STATUS_LABELS = { 0: 'Açık', 1: 'Tamamlandı', 2: 'İptal' }
 
 const STAGE_COLORS = {
-  draft: 'default', pending_admin: 'orange', preparing: 'blue',
-  pending_waybill_approval: 'purple', ready_to_ship: 'cyan', shipped: 'green',
+  draft: 'default', pending_admin: 'orange', parasut_review: 'blue',
+  pending_parasut_approval: 'purple', preparing: 'cyan', shipped: 'green',
 }
 const STAGE_LABELS = {
-  draft: 'Taslak', pending_admin: 'Admin Onayı Bekleniyor', preparing: 'Hazırlanıyor',
-  pending_waybill_approval: 'İrsaliye Onayı Bekleniyor', ready_to_ship: 'Sevke Hazır', shipped: 'Sevk Edildi',
+  draft: 'Taslak', pending_admin: 'Yönetici Onayı Bekleniyor', parasut_review: 'Paraşüt Kontrolü Yapılıyor',
+  pending_parasut_approval: 'Paraşüt Onayı Bekleniyor', preparing: 'Sevk İçin Hazırlanıyor', shipped: 'Sevk Edildi',
 }
 
 export default function OrderDetailPage() {
@@ -249,20 +249,6 @@ export default function OrderDetailPage() {
                     >
                       Paraşüt'te Görüntüle
                     </Button>
-                  )}
-                  {shipment && (
-                    <Popconfirm
-                      title="Faturayı sil"
-                      description="Bu fatura Paraşüt'ten silinecek ve sevkiyat kaydından kaldırılacak. Emin misiniz?"
-                      onConfirm={deleteInvoice}
-                      okText="Evet, Sil"
-                      cancelText="Vazgeç"
-                      okButtonProps={{ danger: true }}
-                    >
-                      <Button danger icon={<DeleteOutlined />} size="small" loading={deletingInvoice}>
-                        Faturayı Sil
-                      </Button>
-                    </Popconfirm>
                   )}
                 </div>
               </>

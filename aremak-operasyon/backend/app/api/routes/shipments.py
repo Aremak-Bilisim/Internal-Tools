@@ -1,8 +1,10 @@
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
@@ -12,25 +14,26 @@ from app.services import email as email_svc
 from app.services import teamgram
 from app.services import parasut
 
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 STAGE_TRANSITIONS = {
-    "draft":                    {"next": "pending_admin",           "roles": ["admin", "sales"]},
-    "pending_admin":            {"next": "preparing",               "roles": ["admin"]},
-    "preparing":                {"next": "pending_waybill_approval","roles": ["warehouse"]},
-    "pending_waybill_approval": {"next": "ready_to_ship",           "roles": ["admin"]},
-    "ready_to_ship":            {"next": "shipped",                 "roles": ["warehouse"]},
+    "pending_admin":              {"next": "parasut_review",            "roles": ["admin"]},
+    "parasut_review":             {"next": "pending_parasut_approval",  "roles": ["warehouse"]},
+    "pending_parasut_approval":   {"next": "preparing",                 "roles": ["admin"]},
+    "preparing":                  {"next": "shipped",                   "roles": ["warehouse"]},
 }
 
 STAGE_LABELS = {
-    "draft":                    "Taslak",
-    "pending_admin":            "Admin Onayı Bekleniyor",
-    "preparing":                "Hazırlanıyor",
-    "pending_waybill_approval": "İrsaliye Onayı Bekleniyor",
-    "ready_to_ship":            "Sevke Hazır",
-    "shipped":                  "Sevk Edildi",
+    "pending_admin":              "Yönetici Onayı Bekleniyor",
+    "parasut_review":             "Paraşüt Kontrolü Yapılıyor",
+    "pending_parasut_approval":   "Paraşüt Onayı Bekleniyor",
+    "preparing":                  "Sevk İçin Hazırlanıyor",
+    "shipped":                    "Sevk Edildi",
 }
 
 
@@ -91,6 +94,7 @@ def _shipment_to_dict(s: ShipmentRequest) -> dict:
         "created_by": {"id": s.created_by.id, "name": s.created_by.name} if s.created_by else None,
         "assigned_to": {"id": s.assigned_to.id, "name": s.assigned_to.name} if s.assigned_to else None,
         "cargo_photo_urls": s.cargo_photo_urls or [],
+        "cargo_pdf_url": s.cargo_pdf_url,
         "cargo_tracking_no": s.cargo_tracking_no,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
@@ -151,11 +155,25 @@ def create_shipment(
         items=data.items,
         assigned_to_id=data.assigned_to_id,
         created_by_id=current_user.id,
-        stage="draft",
+        stage="pending_admin",
     )
     db.add(s)
     db.commit()
     db.refresh(s)
+
+    # Creation history entry
+    creation_note = data.notes or ""
+    history = ShipmentHistory(
+        shipment_id=s.id,
+        stage_from=None,
+        stage_to="pending_admin",
+        note=f"[CREATED] {creation_note}".strip(),
+        user_id=current_user.id,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(s)
+
     result = _shipment_to_dict(s)
 
     # Post-creation side effects — hataları topla, response'a ekle
@@ -170,13 +188,13 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
     Returns list of warning strings for any non-fatal failures."""
     warnings = []
 
-    # 1. Send email to all warehouse users
-    warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
-    for u in warehouse_users:
-        try:
-            email_svc.send_shipment_notification(shipment, u.email, u.name)
-        except Exception as e:
-            logger.error(f"Email to {u.email} failed: {e}")
+    # 1. Notify admins (shipment created directly as pending_admin)
+    try:
+        admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+        admin_list = [(email_svc._notif_email(u), u.name) for u in admins]
+        email_svc.send_pending_admin(shipment, admin_list, note=shipment.get("notes") or "")
+    except Exception as e:
+        logger.error(f"Admin notification failed: {e}")
 
     # 2. Update TeamGram order: Status=1 (Tamamlandı), stage=Hazırlanıyor
     if tg_order_id:
@@ -304,18 +322,26 @@ def advance_stage(
         warehouse_list = [(email_svc._notif_email(u), u.name) for u in warehouse_users]
         sales_list = [(email_svc._notif_email(u), u.name) for u in sales_users]
 
+        note = data.note or ""
         if new_stage == "pending_admin":
-            email_svc.send_pending_admin(shipment_dict, admin_list)
+            email_svc.send_pending_admin(shipment_dict, admin_list, note)
+        elif new_stage == "parasut_review":
+            email_svc.send_approved_to_warehouse(shipment_dict, warehouse_list, note, actor_name=current_user.name)
+        elif new_stage == "pending_parasut_approval":
+            email_svc.send_waybill_approval_request(shipment_dict, admin_list, note, actor_name=current_user.name)
         elif new_stage == "preparing":
-            email_svc.send_approved_to_warehouse(shipment_dict, warehouse_list)
-        elif new_stage == "pending_waybill_approval":
-            email_svc.send_waybill_approval_request(shipment_dict, admin_list)
-        elif new_stage == "ready_to_ship":
-            email_svc.send_ready_to_ship(shipment_dict, warehouse_list)
+            email_svc.send_ready_to_ship(shipment_dict, warehouse_list, note, actor_name=current_user.name)
         elif new_stage == "shipped":
-            email_svc.send_shipped(shipment_dict, admin_list, sales_list)
+            email_svc.send_shipped(shipment_dict, admin_list, sales_list, note)
     except Exception as e:
         logger.error(f"Stage transition email failed ({old_stage} → {new_stage}): {e}")
+
+    # TeamGram sync: sevk edilince sipariş aşamasını güncelle
+    if new_stage == "shipped" and s.tg_order_id:
+        try:
+            asyncio.run(teamgram.update_order_status(s.tg_order_id, status=1, stage_name="Sevk edildi"))
+        except Exception as e:
+            logger.warning(f"TeamGram status update failed for order {s.tg_order_id}: {e}")
 
     return _shipment_to_dict(s)
 
@@ -356,6 +382,51 @@ def delete_shipment_invoice(
         except Exception as e:
             logger.warning(f"TeamGram HasInvoice clear failed for order {tg_order_id}: {e}")
 
+    db.refresh(s)
+    return _shipment_to_dict(s)
+
+
+@router.post("/{shipment_id}/upload/cargo-pdf")
+def upload_cargo_pdf(
+    shipment_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("warehouse", "admin")),
+):
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    ext = os.path.splitext(file.filename or "")[1] or ".pdf"
+    filename = f"cargo_pdf_{shipment_id}_{uuid.uuid4().hex[:8]}{ext}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    with open(path, "wb") as f:
+        f.write(file.file.read())
+    s.cargo_pdf_url = f"/uploads/{filename}"
+    db.commit()
+    db.refresh(s)
+    return _shipment_to_dict(s)
+
+
+@router.post("/{shipment_id}/upload/cargo-photos")
+def upload_cargo_photos(
+    shipment_id: int,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("warehouse", "admin")),
+):
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    urls = list(s.cargo_photo_urls or [])
+    for file in files:
+        ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+        filename = f"cargo_photo_{shipment_id}_{uuid.uuid4().hex[:8]}{ext}"
+        path = os.path.join(UPLOAD_DIR, filename)
+        with open(path, "wb") as f:
+            f.write(file.file.read())
+        urls.append(f"/uploads/{filename}")
+    s.cargo_photo_urls = urls
+    db.commit()
     db.refresh(s)
     return _shipment_to_dict(s)
 

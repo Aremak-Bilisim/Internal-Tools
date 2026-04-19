@@ -7,6 +7,7 @@ import {
 import { FilePdfOutlined, ReloadOutlined, SendOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import api from '../services/api'
+import { useAuthStore } from '../store/auth'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -73,6 +74,7 @@ const parseAddress = (raw) => {
 
 export default function OrdersPage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const [data, setData] = useState({ List: [], OrderCount: 0 })
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -495,7 +497,7 @@ export default function OrdersPage() {
         return (
           <div>
             <div>{name}</div>
-            {!shipmentOrderIds.has(r.Id) && !shipmentOrderNames.has(r.Displayname) && (
+            {!shipmentOrderIds.has(r.Id) && !shipmentOrderNames.has(r.Displayname) && user?.role !== 'warehouse' && (
               <button
                 className="sevk-btn"
                 onClick={(e) => { e.stopPropagation(); openShipmentDrawer(r) }}

@@ -2,6 +2,7 @@ import smtplib
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from typing import List, Tuple
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ def _notif_email(user) -> str:
     return user.get("notification_email") or user.get("email", "")
 
 
-def _send(subject: str, html: str, recipients: list[tuple[str, str]]):
+def _send(subject: str, html: str, recipients: List[Tuple[str, str]]):
     """Generic send helper. recipients = [(email, name), ...]"""
     if not settings.SMTP_PASSWORD or not settings.SMTP_USER:
         return
@@ -116,6 +117,17 @@ def _shipment_summary_rows(s: dict) -> str:
     )
 
 
+def _note_block(note: str) -> str:
+    if not note:
+        return ""
+    return (
+        f"<div style='margin:16px 0;padding:12px 16px;background:#fffbe6;"
+        f"border-left:4px solid #faad14;border-radius:4px'>"
+        f"<b style='font-size:12px;color:#ad6800'>NOT</b>"
+        f"<p style='margin:4px 0 0;color:#333'>{note}</p></div>"
+    )
+
+
 def _base_email(header_color: str, title: str, body: str) -> str:
     return f"""<html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto">
 <div style="background:{header_color};padding:16px 24px;border-radius:8px 8px 0 0">
@@ -127,57 +139,62 @@ def _base_email(header_color: str, title: str, body: str) -> str:
 </div></body></html>"""
 
 
-def send_pending_admin(shipment: dict, admins: list[tuple[str, str]]):
+def send_pending_admin(shipment: dict, admins: List[Tuple[str, str]], note: str = ""):
     """draft → pending_admin: Admin onayı gerekiyor."""
     rows = _shipment_summary_rows(shipment)
     html = _base_email("#d46b08", "Sevk Talebi Onay Bekliyor",
         f"<p>Merhaba {{{{name}}}},</p>"
         f"<p><b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> siparişi için "
         f"sevk talebi oluşturuldu ve onayınızı bekliyor.</p>"
+        f"{_note_block(note)}"
         f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
-    _send(f"[Onay Bekliyor] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, admins)
+    _send(f"[Yönetici Onayı] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, admins)
 
 
-def send_approved_to_warehouse(shipment: dict, warehouse_users: list[tuple[str, str]]):
-    """pending_admin → preparing: Sevk sorumlusuna hazırlık başlasın."""
+def send_approved_to_warehouse(shipment: dict, warehouse_users: List[Tuple[str, str]], note: str = "", actor_name: str = "Yönetici"):
+    """pending_admin → parasut_review: Sevk sorumlusuna Paraşüt kontrolü başlasın."""
     rows = _shipment_summary_rows(shipment)
-    html = _base_email("#1a3c5e", "Sevk Talebi Onaylandı — Hazırlık Başlasın",
+    html = _base_email("#1a3c5e", "Sevk Talebi Onaylandı — Paraşüt Kontrolü",
         f"<p>Merhaba {{{{name}}}},</p>"
         f"<p><b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> siparişinin "
-        f"sevk talebi admin tarafından onaylandı. Lütfen hazırlığa başlayın.</p>"
+        f"sevk talebi <b>{actor_name}</b> tarafından onaylandı. Lütfen Paraşüt'teki fatura ve irsaliyeyi kontrol edin.</p>"
+        f"{_note_block(note)}"
         f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
-    _send(f"[Hazırlık] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, warehouse_users)
+    _send(f"[Paraşüt Kontrolü] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, warehouse_users)
 
 
-def send_waybill_approval_request(shipment: dict, admins: list[tuple[str, str]]):
-    """preparing → pending_waybill_approval: Admin irsaliye onayı gerekiyor."""
+def send_waybill_approval_request(shipment: dict, admins: List[Tuple[str, str]], note: str = "", actor_name: str = "Sevk sorumlusu"):
+    """parasut_review → pending_parasut_approval: Admin Paraşüt onayı gerekiyor."""
     rows = _shipment_summary_rows(shipment)
-    html = _base_email("#531dab", "İrsaliye Onayı Talep Edildi",
+    html = _base_email("#531dab", "Paraşüt Onayı Talep Edildi",
         f"<p>Merhaba {{{{name}}}},</p>"
-        f"<p>Sevk sorumlusu <b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> "
-        f"siparişi için Paraşüt'teki fatura ve irsaliyeyi hazırladı. "
-        f"Lütfen kontrol edip onaylayın.</p>"
+        f"<p><b>{actor_name}</b>, <b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> "
+        f"siparişi için Paraşüt kontrolünü tamamladı. "
+        f"Lütfen Paraşüt'teki fatura ve irsaliyeyi onaylayın.</p>"
+        f"{_note_block(note)}"
         f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
-    _send(f"[İrsaliye Onayı] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, admins)
+    _send(f"[Paraşüt Belgesi Onayı] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, admins)
 
 
-def send_ready_to_ship(shipment: dict, warehouse_users: list[tuple[str, str]]):
-    """pending_waybill_approval → ready_to_ship: Sevk sorumlusuna sevke hazır."""
+def send_ready_to_ship(shipment: dict, warehouse_users: List[Tuple[str, str]], note: str = "", actor_name: str = "Yönetici"):
+    """pending_parasut_approval → preparing: Sevk sorumlusuna sevk için hazırlık başlasın."""
     rows = _shipment_summary_rows(shipment)
-    html = _base_email("#237804", "İrsaliye Onaylandı — Sevke Hazır",
+    html = _base_email("#237804", "Paraşüt Onaylandı — Sevk İçin Hazırla",
         f"<p>Merhaba {{{{name}}}},</p>"
         f"<p><b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> siparişinin "
-        f"irsaliyesi admin tarafından onaylandı. Ürünleri hazırlayıp kargo fişi ile sevk edebilirsiniz.</p>"
+        f"Paraşüt kaydı <b>{actor_name}</b> tarafından onaylandı. Ürünleri hazırlayıp kargo fişi ile sevk edebilirsiniz.</p>"
+        f"{_note_block(note)}"
         f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
     _send(f"[Sevke Hazır] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, warehouse_users)
 
 
-def send_shipped(shipment: dict, admins: list[tuple[str, str]], sales_users: list[tuple[str, str]]):
+def send_shipped(shipment: dict, admins: List[Tuple[str, str]], sales_users: List[Tuple[str, str]], note: str = ""):
     """ready_to_ship → shipped: Sevk tamamlandı bildirim."""
     rows = _shipment_summary_rows(shipment)
     html = _base_email("#135200", "Sevk Tamamlandı",
         f"<p>Merhaba {{{{name}}}},</p>"
         f"<p><b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> siparişi sevk edildi.</p>"
+        f"{_note_block(note)}"
         f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
     subject = f"[Sevk Edildi] {shipment.get('tg_order_name') or shipment.get('customer_name')}"
     _send(subject, html, admins + sales_users)
