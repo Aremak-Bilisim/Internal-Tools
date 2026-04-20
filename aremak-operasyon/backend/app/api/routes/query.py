@@ -414,8 +414,6 @@ async def create_customer(body: dict, db: Session = Depends(get_db), current_use
         contact_info_list.append({"Type": "Email", "Value": body["email"]})
     if body.get("website"):
         contact_info_list.append({"Type": "Website", "Value": body["website"]})
-    if body.get("address"):
-        contact_info_list.append({"Type": "Address", "Value": body["address"]})
 
     custom_field_datas = []
     if body.get("musteri_tipi"):
@@ -433,6 +431,7 @@ async def create_customer(body: dict, db: Session = Depends(get_db), current_use
         "TaxOffice": body.get("tax_office") or "",
         "CityName": body.get("city") or "",
         "StateName": body.get("district") or "",
+        "Address": body.get("address") or "",   # top-level adres alanı
         "BasicRelationTypes": basic_relation_types,
         "ContactInfoList": contact_info_list or None,
         "CustomFieldDatas": custom_field_datas or None,
