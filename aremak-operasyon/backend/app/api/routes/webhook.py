@@ -9,12 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 async def _sync_tg_company(tg_id: int):
-    """Tek bir TeamGram firmasını DB'ye upsert eder."""
+    """Tek bir TeamGram firmasını DB'ye upsert eder. Artık yoksa siler."""
     from app.services import teamgram
     from app.services.tg_sync import _company_to_dict, _upsert
     try:
         c = await teamgram._get(f"{teamgram.DOMAIN}/Companies/Get", {"id": tg_id})
         if not c or not c.get("Id"):
+            # TeamGram'da bulunamadı — silinmiş olabilir, DB'den de temizle
+            _delete_tg_company(tg_id)
             return
         db = SessionLocal()
         try:
