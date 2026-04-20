@@ -388,8 +388,9 @@ async def create_irsaliye_from_invoice(
     if not issue_date:
         issue_date = today.isoformat()
 
-    # Düzenleme tarihi saati: irsaliyenin oluşturulduğu an (UTC, Z suffix ile)
+    # Düzenleme tarihi saati: irsaliyenin oluşturulduğu an (UTC)
     issue_datetime_utc = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    issue_time_utc = now_utc.strftime("%H:%M:%S")
 
     # Fiili sevk tarihi: planlanan tarih, saat 12:00 UTC (= 15:00 TR saati)
     # → issue_date ile aynı gün, düzenleme tarihinden sonra
@@ -491,6 +492,7 @@ async def create_irsaliye_from_invoice(
     attrs: dict = {
         "inflow": False,
         "issue_date": issue_date,
+        "issue_time": issue_time_utc,
         "issue_datetime": issue_datetime_utc,
         "shipment_date": shipment_datetime,
         "description": irsaliye_desc,

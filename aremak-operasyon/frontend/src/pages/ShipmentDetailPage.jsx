@@ -273,7 +273,7 @@ export default function ShipmentDetailPage() {
                     {shipment.cargo_pdf_url ? (
                       <Space>
                         <Tag color="green" icon={<PaperClipOutlined />}>
-                          <a href={`http://localhost:8000${shipment.cargo_pdf_url}`} target="_blank" rel="noreferrer">
+                          <a href={shipment.cargo_pdf_url} target="_blank" rel="noreferrer">
                             Kargo Fişi Yüklendi
                           </a>
                         </Tag>
@@ -295,7 +295,7 @@ export default function ShipmentDetailPage() {
                       {(shipment.cargo_photo_urls || []).map((url, i) => (
                         <Image
                           key={i}
-                          src={`http://localhost:8000${url}`}
+                          src={url}
                           width={72}
                           height={72}
                           style={{ objectFit: 'cover', borderRadius: 4 }}
@@ -374,7 +374,7 @@ export default function ShipmentDetailPage() {
                     <Button
                       icon={<FilePdfOutlined />}
                       size="small"
-                      href={`http://localhost:8000${shipment.cargo_pdf_url}`}
+                      href={shipment.cargo_pdf_url}
                       target="_blank"
                       rel="noreferrer"
                       style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
@@ -392,7 +392,7 @@ export default function ShipmentDetailPage() {
                       {shipment.cargo_photo_urls.map((url, i) => (
                         <Image
                           key={i}
-                          src={`http://localhost:8000${url}`}
+                          src={url}
                           width={80}
                           height={80}
                           style={{ objectFit: 'cover', borderRadius: 4 }}
