@@ -4,7 +4,7 @@ import {
   message, Row, Col, InputNumber, Spin
 } from 'antd'
 import { SaveOutlined, SearchOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 
 const { Title } = Typography
@@ -37,6 +37,7 @@ export default function CustomerNewPage() {
   const [meta, setMeta] = useState({ industries: [], channels: [], relation_types: [] })
   const [metaLoading, setMetaLoading] = useState(true)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   useEffect(() => {
     api.get('/query/customer/meta')
@@ -44,6 +45,37 @@ export default function CustomerNewPage() {
       .catch(() => message.warning('Seçenek listeleri yüklenemedi'))
       .finally(() => setMetaLoading(false))
   }, [])
+
+  // URL'den VKN geliyorsa forma yaz ve GİB'i otomatik sorgula
+  useEffect(() => {
+    const vkn = searchParams.get('vkn')
+    if (vkn) {
+      form.setFieldsValue({ tax_no: vkn })
+      // Meta yüklendikten sonra GİB sorgusunu tetikle
+      const tryGib = async () => {
+        setGibLoading(true)
+        try {
+          const res = await api.get(`/query/taxpayer/${vkn}`)
+          const gib = res.data?.gib
+          if (!gib) { message.warning("GİB'de bu VKN için kayıt bulunamadı"); return }
+          const a = gib.addressInformation?.[0] || {}
+          form.setFieldsValue({
+            name: gib.identityTitle || gib.title || '',
+            tax_office: gib.taxOfficeName || '',
+            address: buildAddress(gib),
+            district: a.county || '',
+            city: a.city || '',
+          })
+          message.success('GİB bilgileri forma aktarıldı')
+        } catch {
+          message.error('GİB sorgusu başarısız')
+        } finally {
+          setGibLoading(false)
+        }
+      }
+      tryGib()
+    }
+  }, [searchParams])
 
   const handleGibSorgula = async () => {
     const vkn = form.getFieldValue('tax_no')?.trim()

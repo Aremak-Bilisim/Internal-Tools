@@ -4,6 +4,7 @@ import {
   SearchOutlined, CopyOutlined, CheckCircleOutlined, CloseCircleOutlined,
   BankOutlined, ShopOutlined, PlusOutlined, SyncOutlined, LinkOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
 const TG_BASE = 'https://www.teamgram.com/aremak'
@@ -53,6 +54,7 @@ function buildAddress(gib) {
 }
 
 export default function CustomerQueryPage() {
+  const navigate = useNavigate()
   const [mode, setMode] = useState('vkn')
 
   // VKN mode state
@@ -118,7 +120,7 @@ export default function CustomerQueryPage() {
   // Aksiyon butonları
   const ActionBar = ({ actions }) => (
     <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f5f5f5', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {actions.map(({ key, label, icon, danger, endpoint, body, href }) => (
+      {actions.map(({ key, label, icon, danger, endpoint, body, href, onClick }) => (
         href
           ? <Button
               key={key}
@@ -127,6 +129,17 @@ export default function CustomerQueryPage() {
               icon={icon}
               href={href}
               target="_blank"
+            >
+              {label}
+            </Button>
+          : onClick
+          ? <Button
+              key={key}
+              size="small"
+              type="primary"
+              ghost
+              icon={icon}
+              onClick={onClick}
             >
               {label}
             </Button>
@@ -197,8 +210,7 @@ export default function CustomerQueryPage() {
         key: 'tg-add',
         label: "TeamGram'a Ekle",
         icon: <PlusOutlined />,
-        endpoint: '/query/teamgram/add',
-        body: { gib },
+        onClick: () => navigate(`/customer-new?vkn=${gib.taxIdentificationNumber || vkn}`),
       }]
   ) : []
 
