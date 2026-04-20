@@ -275,26 +275,34 @@ export default function CustomerQueryPage() {
                         ? `${gib.dateOfStart.slice(6,8)}.${gib.dateOfStart.slice(4,6)}.${gib.dateOfStart.slice(0,4)}`
                         : null
                     } />
-                    {/* GİB ile güncelle kısayolları — her iki sistemde kayıtlıysa göster */}
-                    {(parasut || tgList.length > 0) && (() => {
-                      const gibUpdateActions = [
-                        ...(parasut ? [{
-                          key: 'gib-update-parasut',
-                          label: "Paraşüt'ü GİB ile Güncelle",
-                          icon: <SyncOutlined />,
-                          endpoint: `/query/parasut/${parasut.id}/update`,
-                          body: { gib },
-                        }] : []),
-                        ...tgList.map(c => ({
-                          key: `gib-update-tg-${c.id}`,
-                          label: tgList.length > 1 ? `TeamGram'ı GİB ile Güncelle (${c.name})` : "TeamGram'ı GİB ile Güncelle",
-                          icon: <SyncOutlined />,
-                          endpoint: `/query/teamgram/${c.id}/update`,
-                          body: { gib },
-                        })),
-                      ]
-                      return <ActionBar actions={gibUpdateActions} />
-                    })()}
+                    {/* Tümünü GİB ile güncelle — en az bir sistemde kayıtlıysa göster */}
+                    {(parasut || tgList.length > 0) && (
+                      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f5f5f5' }}>
+                        <Popconfirm
+                          title="Tümünü GİB ile Güncelle"
+                          description="Kayıtlı tüm sistemler GİB verileriyle güncellenecek. Onaylıyor musunuz?"
+                          okText="Evet"
+                          cancelText="Hayır"
+                          onConfirm={async () => {
+                            const jobs = [
+                              ...(parasut ? [doAction('gib-all-parasut', `/query/parasut/${parasut.id}/update`, { gib })] : []),
+                              ...tgList.map(c => doAction(`gib-all-tg-${c.id}`, `/query/teamgram/${c.id}/update`, { gib })),
+                            ]
+                            await Promise.all(jobs)
+                          }}
+                        >
+                          <Button
+                            size="small"
+                            type="primary"
+                            ghost
+                            icon={<SyncOutlined />}
+                            loading={!!(actionLoading['gib-all-parasut'] || tgList.some(c => actionLoading[`gib-all-tg-${c.id}`]))}
+                          >
+                            Tümünü GİB ile Güncelle
+                          </Button>
+                        </Popconfirm>
+                      </div>
+                    )}
                   </>
                 ) : <Empty description="Bu VKN için GİB kaydı bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
               </Card>
