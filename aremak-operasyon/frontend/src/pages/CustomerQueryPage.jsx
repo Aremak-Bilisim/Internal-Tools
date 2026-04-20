@@ -369,6 +369,8 @@ export default function CustomerQueryPage() {
                         {i > 0 && <Divider style={{ margin: '8px 0' }} />}
                         <Field label="Firma Adı" value={c.name} />
                         <Field label="Vergi No" value={c.tax_no} />
+                        <Field label="Vergi Dairesi" value={c.tax_office} />
+                        <Field label="Adres" value={c.address} />
                         <Field label="İlçe / İl" value={[c.district, c.city].filter(Boolean).join(' / ') || null} />
                         <Field label="Telefon" value={c.phone} />
                         <Field label="E-Posta" value={c.email} />
@@ -395,6 +397,8 @@ export default function CustomerQueryPage() {
                         {i > 0 && <Divider style={{ margin: '8px 0' }} />}
                         <Field label="Firma Adı" value={c.name} />
                         <Field label="Vergi No" value={c.tax_number} />
+                        <Field label="Vergi Dairesi" value={c.tax_office} />
+                        <Field label="Adres" value={c.address} />
                         <Field label="İlçe / İl" value={[c.district, c.city].filter(Boolean).join(' / ') || null} />
                         <Field label="E-Posta" value={c.email} />
                         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f5f5f5' }}>

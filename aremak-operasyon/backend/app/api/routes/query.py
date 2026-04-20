@@ -192,6 +192,7 @@ async def search_by_name(q: str, db: Session = Depends(get_db), current_user=Dep
     )
     tg_results = [
         {"id": r.tg_id, "name": r.name, "tax_no": r.tax_no,
+         "tax_office": r.tax_office, "address": r.address,
          "city": r.city, "district": r.district, "phone": r.phone, "email": r.email}
         for r in tg_rows
     ]
@@ -213,6 +214,8 @@ async def search_by_name(q: str, db: Session = Depends(get_db), current_user=Dep
                         "id": item["id"],
                         "name": a.get("name"),
                         "tax_number": a.get("tax_number"),
+                        "tax_office": a.get("tax_office"),
+                        "address": a.get("address"),
                         "city": a.get("city"),
                         "district": a.get("district"),
                         "email": a.get("email"),
