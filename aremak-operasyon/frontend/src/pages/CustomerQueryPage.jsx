@@ -275,6 +275,26 @@ export default function CustomerQueryPage() {
                         ? `${gib.dateOfStart.slice(6,8)}.${gib.dateOfStart.slice(4,6)}.${gib.dateOfStart.slice(0,4)}`
                         : null
                     } />
+                    {/* GİB ile güncelle kısayolları — her iki sistemde kayıtlıysa göster */}
+                    {(parasut || tgList.length > 0) && (() => {
+                      const gibUpdateActions = [
+                        ...(parasut ? [{
+                          key: 'gib-update-parasut',
+                          label: "Paraşüt'ü GİB ile Güncelle",
+                          icon: <SyncOutlined />,
+                          endpoint: `/query/parasut/${parasut.id}/update`,
+                          body: { gib },
+                        }] : []),
+                        ...tgList.map(c => ({
+                          key: `gib-update-tg-${c.id}`,
+                          label: tgList.length > 1 ? `TeamGram'ı GİB ile Güncelle (${c.name})` : "TeamGram'ı GİB ile Güncelle",
+                          icon: <SyncOutlined />,
+                          endpoint: `/query/teamgram/${c.id}/update`,
+                          body: { gib },
+                        })),
+                      ]
+                      return <ActionBar actions={gibUpdateActions} />
+                    })()}
                   </>
                 ) : <Empty description="Bu VKN için GİB kaydı bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
               </Card>
