@@ -10,6 +10,7 @@ import ShipmentsPage from './pages/ShipmentsPage'
 import ShipmentDetailPage from './pages/ShipmentDetailPage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import CustomerQueryPage from './pages/CustomerQueryPage'
+import CustomerNewPage from './pages/CustomerNewPage'
 
 function PrivateRoute({ children }) {
   const token = useAuthStore((s) => s.token)
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="shipments" element={<ShipmentsPage />} />
         <Route path="shipments/:id" element={<ShipmentDetailPage />} />
         <Route path="customer-query" element={<CustomerQueryPage />} />
+        <Route path="customer-new" element={<CustomerNewPage />} />
       </Route>
     </Routes>
   )

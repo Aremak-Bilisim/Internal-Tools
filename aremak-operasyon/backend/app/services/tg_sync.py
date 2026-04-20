@@ -23,21 +23,61 @@ FULL_SYNC_INTERVAL = 24 * 3600   # 24 saat
 INCREMENTAL_INTERVAL = 3600      # 1 saat
 
 
+# TeamGram'ın döndürdüğü adres tipi adlarının tam listesi (Türkçe dahil)
+_ADDRESS_TYPE_NAMES = {
+    "Address", "address",
+    "Adres", "adres",
+    "İş", "iş", "Iş", "ış",   # Türkçe büyük/küçük harf varyantları
+    "Work", "work",
+    "Business", "business",
+    "Ev", "ev",
+    "Home", "home",
+}
+
+
 def _company_to_dict(c: dict) -> dict:
     contacts = c.get("Contactinfos", [])
-    address_info = next(
-        (x for x in contacts if x.get("ContactinfoType", {}).get("Name") == "Address"), None
-    )
+
+    # Adres tipi kontaklarını bul — "Address", "İş", "Ev" vb. hepsini kabul et
+    addr_contacts = [
+        x for x in contacts
+        if (x.get("ContactinfoType", {}).get("Name") or "") in _ADDRESS_TYPE_NAMES
+    ]
+    addr_with_value = [x for x in addr_contacts if x.get("Value")]
+    if addr_with_value:
+        address_info = sorted(addr_with_value, key=lambda x: x.get("ValuesOrder", 0), reverse=True)[0]
+    else:
+        address_info = addr_contacts[0] if addr_contacts else None
+
+    # Adres değeri: Contactinfos'tan veya top-level Address alanından
+    address_value = None
+    if address_info and address_info.get("Value"):
+        address_value = address_info["Value"]
+    elif c.get("Address"):
+        address_value = c["Address"]
+
     phone = next((x.get("Value") for x in contacts if x.get("ContactinfoType", {}).get("Name") == "Phone"), None)
     email = next((x.get("Value") for x in contacts if x.get("ContactinfoType", {}).get("Name") == "Email"), None)
+
+    # City/district: önce top-level, sonra tüm adres kayıtlarından ilk bulduğu
+    city = c.get("CityName")
+    district = c.get("StateName")
+    for x in addr_contacts:
+        if not city:
+            city = x.get("CityName")
+        if not district:
+            district = x.get("StateName")
+        if city and district:
+            break
+
     return {
         "tg_id": c["Id"],
         "name": c.get("Name"),
         "tax_no": (c.get("TaxNo") or "").strip() or None,
         "tax_office": c.get("TaxOffice") or None,
-        "address": address_info.get("Value") if address_info else None,
-        "city": c.get("CityName") or (address_info.get("CityName") if address_info else None),
-        "district": c.get("StateName") or (address_info.get("StateName") if address_info else None),
+        "address": address_value,
+        "city": city,
+        "district": district,
         "phone": phone,
         "email": email,
     }

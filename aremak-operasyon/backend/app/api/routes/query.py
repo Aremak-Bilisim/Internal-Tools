@@ -31,8 +31,6 @@ def _build_address_str(gib: dict) -> str:
         a.get("street") or "",
         (f"No:{a.get('exteriorDoorNumber', '')} "
          f"{('İç:' + a['interiorDoorNo']) if a.get('interiorDoorNo') else ''}").strip() or "",
-        a.get("county") or "",
-        a.get("city") or "",
     ]
     return " ".join(p for p in parts if p).strip()
 
@@ -55,6 +53,7 @@ def _gib_to_parasut_attrs(gib: dict) -> dict:
         "address": " ".join(p for p in address_parts if p).strip(),
         "account_type": "customer",
         "contact_type": "company",
+        "exchange_rate_type": "selling",
     }
 
 
@@ -149,6 +148,57 @@ async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=D
         "parasut": parasut_contact,
         "teamgram": tg_companies,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /search  — Ünvan ile firma ara (TG local DB + Paraşüt)
+# ---------------------------------------------------------------------------
+
+@router.get("/search")
+async def search_by_name(q: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    q = q.strip()
+    if not q:
+        return {"teamgram": [], "parasut": []}
+
+    # TeamGram local DB
+    tg_rows = (
+        db.query(TeamgramCompany)
+        .filter(TeamgramCompany.name.ilike(f"%{q}%"))
+        .order_by(TeamgramCompany.name)
+        .limit(30)
+        .all()
+    )
+    tg_results = [
+        {"id": r.tg_id, "name": r.name, "tax_no": r.tax_no,
+         "city": r.city, "district": r.district, "phone": r.phone, "email": r.email}
+        for r in tg_rows
+    ]
+
+    # Paraşüt
+    parasut_results = []
+    try:
+        token = await _get_token()
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{BASE}/v4/{COMPANY}/contacts",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"filter[query]": q, "page[size]": 20}
+            )
+            if r.status_code == 200:
+                for item in r.json().get("data", []):
+                    a = item["attributes"]
+                    parasut_results.append({
+                        "id": item["id"],
+                        "name": a.get("name"),
+                        "tax_number": a.get("tax_number"),
+                        "city": a.get("city"),
+                        "district": a.get("district"),
+                        "email": a.get("email"),
+                    })
+    except Exception as e:
+        logger.warning(f"Paraşüt arama hatası: {e}")
+
+    return {"teamgram": tg_results, "parasut": parasut_results}
 
 
 # ---------------------------------------------------------------------------
@@ -256,28 +306,28 @@ async def update_teamgram(tg_id: int, body: dict, db: Session = Depends(get_db),
         if not existing:
             raise HTTPException(404, "TeamGram'da firma bulunamadı")
 
-        # GİB alanlarını üzerine yaz, geri kalanını koru
+        # Mevcut kaydı olduğu gibi al, sadece GİB'den gelen alanları güncelle
         infos = gib.get("addressInformation") or [{}]
         a = infos[0]
-        address = _build_address_str(gib)
 
-        existing["Name"] = gib.get("identityTitle") or gib.get("title") or existing.get("Name")
-        existing["TaxNo"] = gib.get("taxIdentificationNumber") or existing.get("TaxNo")
-        existing["TaxOffice"] = gib.get("taxOfficeName") or existing.get("TaxOffice")
-        existing["CityName"] = a.get("city") or existing.get("CityName")
-        existing["StateName"] = a.get("county") or existing.get("StateName")
-
-        # Adres: ContactInfoList içindeki Address tipini güncelle, yoksa ekle
-        if address:
-            contact_list = existing.get("ContactInfoList") or []
-            addr_entry = next((x for x in contact_list if x.get("Type") == "Address"), None)
-            if addr_entry:
-                addr_entry["Value"] = address
-            else:
-                contact_list.append({"Type": "Address", "Value": address})
-            existing["ContactInfoList"] = contact_list
-
-        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Edit", existing)
+        payload = dict(existing)  # tüm mevcut alanları koru
+        payload["Id"] = tg_id
+        payload["Name"] = gib.get("identityTitle") or gib.get("title") or existing.get("Name")
+        payload["TaxNo"] = gib.get("taxIdentificationNumber") or existing.get("TaxNo")
+        payload["TaxOffice"] = gib.get("taxOfficeName") or existing.get("TaxOffice")
+        if a.get("city"):
+            payload["CityName"] = a.get("city")
+        if a.get("county"):
+            payload["StateName"] = a.get("county")
+        gib_address = _build_address_str(gib)
+        if gib_address:
+            payload["Address"] = gib_address
+        # DeliveryAddressId boş teslimat adresi yaratır, ContactInfoList yeni kayıt açar — ikisini çıkar
+        # AddressId korunur: mevcut adres contact info'sunu günceller
+        payload.pop("DeliveryAddressId", None)
+        payload.pop("ContactInfoList", None)
+        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Edit", payload)
+        logger.info(f"TeamGram Edit yanıtı: {result}")
         if not result or not result.get("Result"):
             msg = result.get("Message", "Bilinmeyen hata") if result else "Yanıt alınamadı"
             raise HTTPException(502, f"TeamGram hatası: {msg}")
@@ -293,6 +343,129 @@ async def update_teamgram(tg_id: int, body: dict, db: Session = Depends(get_db),
     except Exception as e:
         logger.error(f"TeamGram güncelleme hatası: {e}")
         raise HTTPException(502, str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /customer/meta  — Form için TeamGram seçenek listeleri
+# ---------------------------------------------------------------------------
+
+@router.get("/customer/meta")
+async def customer_meta(current_user=Depends(get_current_user)):
+    """Sektörler, kanallar ve ilişki tipleri."""
+    try:
+        meta = await tg_svc._get(f"{tg_svc.DOMAIN}/ScheduledRequests/MetaData")
+        industries = [{"id": i["Id"], "name": i["Name"]} for i in meta.get("Industries", [])]
+        channels = [{"id": c["Id"], "name": c["Name"]} for c in meta.get("CustomChannelsLead", [])]
+        relation_types = [
+            {"value": "Customer", "label": "Müşteri"},
+            {"value": "PotentialCustomer", "label": "Potansiyel Müşteri"},
+            {"value": "Supplier", "label": "Tedarikçi"},
+            {"value": "Other", "label": "Diğer"},
+        ]
+        return {"industries": industries, "channels": channels, "relation_types": relation_types}
+    except Exception as e:
+        logger.error(f"Metadata hatası: {e}")
+        raise HTTPException(502, str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /customer/create  — Formdan yeni müşteri oluştur (TG + opsiyonel Paraşüt)
+# ---------------------------------------------------------------------------
+
+@router.post("/customer/create")
+async def create_customer(body: dict, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """
+    body: {
+      name, tax_no, tax_office, address, district, city, phone, email, website,
+      musteri_tipi, indirim_seviyesi, kullanici_tipi,
+      also_parasut: bool
+    }
+    """
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Firma adı zorunludur")
+
+    contact_info_list = []
+    if body.get("phone"):
+        contact_info_list.append({"Type": "Phone", "Value": body["phone"]})
+    if body.get("email"):
+        contact_info_list.append({"Type": "Email", "Value": body["email"]})
+    if body.get("website"):
+        contact_info_list.append({"Type": "Website", "Value": body["website"]})
+    if body.get("address"):
+        contact_info_list.append({"Type": "Address", "Value": body["address"]})
+
+    custom_field_datas = []
+    if body.get("musteri_tipi"):
+        custom_field_datas.append({"CustomFieldId": 192253, "Value": body["musteri_tipi"]})
+    if body.get("indirim_seviyesi") is not None:
+        custom_field_datas.append({"CustomFieldId": 192610, "Value": str(body["indirim_seviyesi"])})
+    if body.get("kullanici_tipi"):
+        custom_field_datas.append({"CustomFieldId": 192611, "Value": body["kullanici_tipi"]})
+
+    basic_relation_types = body.get("basic_relation_types") or ["Customer"]
+
+    tg_payload = {
+        "Name": name,
+        "TaxNo": body.get("tax_no") or "",
+        "TaxOffice": body.get("tax_office") or "",
+        "CityName": body.get("city") or "",
+        "StateName": body.get("district") or "",
+        "BasicRelationTypes": basic_relation_types,
+        "ContactInfoList": contact_info_list or None,
+        "CustomFieldDatas": custom_field_datas or None,
+        "Description": body.get("description") or None,
+        "DefaultDueDays": body.get("default_due_days") or None,
+        "IndustryIds": body.get("industry_ids") or None,
+        "CustomChannelId": body.get("channel_id") or None,
+    }
+
+    try:
+        tg_result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Create", tg_payload)
+        if not tg_result or not tg_result.get("Result"):
+            msg = tg_result.get("Message", "Bilinmeyen hata") if tg_result else "Yanıt alınamadı"
+            raise HTTPException(502, f"TeamGram hatası: {msg}")
+        new_tg_id = tg_result.get("Id")
+        if new_tg_id:
+            c = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": new_tg_id})
+            if c and c.get("Id"):
+                from app.services.tg_sync import _company_to_dict, _upsert
+                _upsert(db, _company_to_dict(c))
+                db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Müşteri oluşturma (TG) hatası: {e}")
+        raise HTTPException(502, str(e))
+
+    parasut_id = None
+    if body.get("also_parasut"):
+        try:
+            attrs = {
+                "name": name,
+                "tax_number": body.get("tax_no") or "",
+                "tax_office": body.get("tax_office") or "",
+                "city": body.get("city") or "",
+                "district": body.get("district") or "",
+                "address": body.get("address") or "",
+                "account_type": "customer",
+                "contact_type": "company",
+                "exchange_rate_type": "selling",
+                "zip_code": body.get("zip_code") or None,
+            }
+            token = await _get_token()
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    f"{BASE}/v4/{COMPANY}/contacts",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"data": {"type": "contacts", "attributes": attrs}}
+                )
+                if r.status_code in (200, 201):
+                    parasut_id = r.json().get("data", {}).get("id")
+        except Exception as e:
+            logger.warning(f"Paraşüt oluşturma hatası (devam edildi): {e}")
+
+    return {"ok": True, "tg_id": new_tg_id, "parasut_id": parasut_id}
 
 
 # ---------------------------------------------------------------------------
