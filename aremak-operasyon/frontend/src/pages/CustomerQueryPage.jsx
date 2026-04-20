@@ -2,9 +2,11 @@ import React, { useState } from 'react'
 import { Input, Button, Card, Spin, Empty, Tag, Tooltip, message, Divider, Space, Typography, Popconfirm } from 'antd'
 import {
   SearchOutlined, CopyOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  BankOutlined, ShopOutlined, PlusOutlined, SyncOutlined,
+  BankOutlined, ShopOutlined, PlusOutlined, SyncOutlined, LinkOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+
+const TG_BASE = 'https://www.teamgram.com/aremak'
 
 const { Title } = Typography
 
@@ -92,25 +94,36 @@ export default function CustomerQueryPage() {
   // Aksiyon butonları
   const ActionBar = ({ actions }) => (
     <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f5f5f5', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {actions.map(({ key, label, icon, danger, endpoint, body }) => (
-        <Popconfirm
-          key={key}
-          title={label}
-          description={`Bu işlemi onaylıyor musunuz?`}
-          okText="Evet"
-          cancelText="Hayır"
-          onConfirm={() => doAction(key, endpoint, body)}
-        >
-          <Button
-            size="small"
-            type={danger ? 'default' : 'primary'}
-            ghost={!danger}
-            icon={icon}
-            loading={!!actionLoading[key]}
-          >
-            {label}
-          </Button>
-        </Popconfirm>
+      {actions.map(({ key, label, icon, danger, endpoint, body, href }) => (
+        href
+          ? <Button
+              key={key}
+              size="small"
+              type="default"
+              icon={icon}
+              href={href}
+              target="_blank"
+            >
+              {label}
+            </Button>
+          : <Popconfirm
+              key={key}
+              title={label}
+              description="Bu işlemi onaylıyor musunuz?"
+              okText="Evet"
+              cancelText="Hayır"
+              onConfirm={() => doAction(key, endpoint, body)}
+            >
+              <Button
+                size="small"
+                type="primary"
+                ghost
+                icon={icon}
+                loading={!!actionLoading[key]}
+              >
+                {label}
+              </Button>
+            </Popconfirm>
       ))}
     </div>
   )
@@ -133,12 +146,11 @@ export default function CustomerQueryPage() {
   ) : []
 
   const tgActions = gib ? (tgList.length > 0
-    ? tgList.map((c, i) => ({
+    ? tgList.map((c) => ({
         key: `tg-update-${c.id}`,
-        label: tgList.length > 1 ? `GİB ile Güncelle (${c.name})` : 'GİB ile Güncelle',
-        icon: <SyncOutlined />,
-        endpoint: `/query/teamgram/${c.id}/update`,
-        body: { gib },
+        label: tgList.length > 1 ? `TeamGram'da Aç (${c.name})` : "TeamGram'da Aç",
+        icon: <LinkOutlined />,
+        href: `${TG_BASE}/companies/show?id=${c.id}`,
       }))
     : [{
         key: 'tg-add',
