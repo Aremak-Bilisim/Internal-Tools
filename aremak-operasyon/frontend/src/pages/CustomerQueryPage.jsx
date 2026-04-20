@@ -46,9 +46,7 @@ function buildAddress(gib) {
     a.street,
     (a.exteriorDoorNumber || a.interiorDoorNo)
       && `No:${a.exteriorDoorNumber || ''} ${a.interiorDoorNo ? `İç:${a.interiorDoorNo}` : ''}`.trim(),
-    a.county,
-    a.city,
-  ].filter(Boolean).join(' ')
+  ].filter(Boolean).join(' ') || null
 }
 
 export default function CustomerQueryPage() {
