@@ -250,12 +250,38 @@ async def update_teamgram(tg_id: int, body: dict, db: Session = Depends(get_db),
     gib = body.get("gib")
     if not gib:
         raise HTTPException(400, "GİB verisi eksik")
-    payload = _gib_to_tg_payload(gib, tg_id=tg_id)
     try:
-        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Edit", payload)
+        # Önce mevcut kaydı çek (zorunlu alanlar korunsun)
+        existing = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Edit", {"id": tg_id})
+        if not existing:
+            raise HTTPException(404, "TeamGram'da firma bulunamadı")
+
+        # GİB alanlarını üzerine yaz, geri kalanını koru
+        infos = gib.get("addressInformation") or [{}]
+        a = infos[0]
+        address = _build_address_str(gib)
+
+        existing["Name"] = gib.get("identityTitle") or gib.get("title") or existing.get("Name")
+        existing["TaxNo"] = gib.get("taxIdentificationNumber") or existing.get("TaxNo")
+        existing["TaxOffice"] = gib.get("taxOfficeName") or existing.get("TaxOffice")
+        existing["CityName"] = a.get("city") or existing.get("CityName")
+        existing["StateName"] = a.get("county") or existing.get("StateName")
+
+        # Adres: ContactInfoList içindeki Address tipini güncelle, yoksa ekle
+        if address:
+            contact_list = existing.get("ContactInfoList") or []
+            addr_entry = next((x for x in contact_list if x.get("Type") == "Address"), None)
+            if addr_entry:
+                addr_entry["Value"] = address
+            else:
+                contact_list.append({"Type": "Address", "Value": address})
+            existing["ContactInfoList"] = contact_list
+
+        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Edit", existing)
         if not result or not result.get("Result"):
             msg = result.get("Message", "Bilinmeyen hata") if result else "Yanıt alınamadı"
             raise HTTPException(502, f"TeamGram hatası: {msg}")
+
         # Local DB güncelle
         c = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": tg_id})
         if c and c.get("Id"):
