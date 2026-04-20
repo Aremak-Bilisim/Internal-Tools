@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import auth, products, orders, shipments, users, webhook, parasut, tcmb, notifications
+from app.api.routes import auth, products, orders, shipments, users, webhook, parasut, tcmb, notifications, query
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -11,3 +11,4 @@ api_router.include_router(webhook.router, prefix="/webhook", tags=["webhook"])
 api_router.include_router(parasut.router, prefix="/parasut", tags=["parasut"])
 api_router.include_router(tcmb.router, prefix="/tcmb", tags=["tcmb"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(query.router, prefix="/query", tags=["query"])

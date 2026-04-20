@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -12,9 +14,26 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# Tüm modelleri yükle (create_all için)
+from app.models import user, shipment, notification, teamgram_company  # noqa
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Aremak Operasyon API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: TeamGram sync arka planda başlat
+    from app.services.tg_sync import start_background_sync
+    task = asyncio.create_task(start_background_sync())
+    yield
+    # Shutdown
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Aremak Operasyon API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,4 +52,4 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "debug": True}
+    return {"status": "ok"}

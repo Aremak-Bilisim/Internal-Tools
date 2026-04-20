@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   UserOutlined,
   BellOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
 import api from '../services/api'
@@ -21,6 +22,7 @@ const menuItems = [
   { key: '/products', icon: <InboxOutlined />, label: 'Ürünler' },
   { key: '/orders', icon: <ShoppingCartOutlined />, label: 'Müşteri Siparişleri' },
   { key: '/shipments', icon: <SendOutlined />, label: 'Sevkiyatlar' },
+  { key: '/customer-query', icon: <SearchOutlined />, label: 'Müşteri Sorgula' },
 ]
 
 export default function AppLayout() {

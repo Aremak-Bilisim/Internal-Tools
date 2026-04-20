@@ -1,11 +1,16 @@
 import asyncio
 import httpx
+import time
 from typing import Optional
 from app.core.config import settings
 
 BASE = settings.TEAMGRAM_BASE_URL
 DOMAIN = settings.TEAMGRAM_DOMAIN
 HEADERS = {"Token": settings.TEAMGRAM_TOKEN}
+
+# VKN → company dict cache (1 saat TTL)
+_vkn_cache: dict = {}   # {"index": {vkn: company_dict}, "fetched_at": float}
+_VKN_CACHE_TTL = 3600   # 1 saat
 
 
 async def _get(path: str, params: dict = None) -> dict:
@@ -69,6 +74,56 @@ async def get_companies(page: int = 1, pagesize: int = 50) -> dict:
 
 async def get_company(company_id: int) -> dict:
     return await _get(f"{DOMAIN}/Companies/Get", {"id": company_id})
+
+
+async def _build_vkn_index() -> dict:
+    """Tüm firmaları GetAll ile çekip VKN→firma index'i oluşturur. Cache'e kaydedilir."""
+    index = {}
+    page = 1
+    pagesize = 100
+    while True:
+        r = await _get(f"{DOMAIN}/Companies/GetAll", {"page": page, "pagesize": pagesize})
+        companies = r.get("companies", [])
+        if not companies:
+            break
+        for c in companies:
+            tax_no = (c.get("TaxNo") or "").strip()
+            if tax_no:
+                contacts = c.get("Contactinfos", [])
+                address_info = next((x for x in contacts if x.get("ContactinfoType", {}).get("Name") == "Address"), None)
+                phone = next((x.get("Value") for x in contacts if x.get("ContactinfoType", {}).get("Name") == "Phone"), None)
+                email = next((x.get("Value") for x in contacts if x.get("ContactinfoType", {}).get("Name") == "Email"), None)
+                index[tax_no] = {
+                    "id": c["Id"],
+                    "name": c.get("Name"),
+                    "tax_no": tax_no,
+                    "tax_office": c.get("TaxOffice"),
+                    "address": address_info.get("Value") if address_info else None,
+                    "city": c.get("CityName") or (address_info.get("CityName") if address_info else None),
+                    "district": c.get("StateName") or (address_info.get("StateName") if address_info else None),
+                    "phone": phone,
+                    "email": email,
+                }
+        total = r.get("count", 0)
+        if page * pagesize >= total:
+            break
+        page += 1
+    return index
+
+
+async def get_companies_by_vkn(vkn: str, company_name: Optional[str] = None) -> list:
+    """VKN ile TeamGram'da firma arar. İlk çağrıda cache oluşturulur (~20-30 sn),
+    sonraki sorgular cache'den anında döner (1 saat TTL)."""
+    global _vkn_cache
+    vkn = vkn.strip()
+
+    now = time.time()
+    if not _vkn_cache.get("index") or now - _vkn_cache.get("fetched_at", 0) > _VKN_CACHE_TTL:
+        index = await _build_vkn_index()
+        _vkn_cache = {"index": index, "fetched_at": now}
+
+    match = _vkn_cache["index"].get(vkn)
+    return [match] if match else []
 
 
 
