@@ -126,21 +126,43 @@ async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=D
     except Exception as e:
         logger.warning(f"Paraşüt sorgusu başarısız: {e}")
 
-    # 3. TeamGram — local DB'den anında sorgula
+    # 3. TeamGram — local DB'den bul, sonra canlı doğrula (silinmiş kayıtları temizle)
     tg_row = db.query(TeamgramCompany).filter(TeamgramCompany.tax_no == vkn).first()
     tg_companies = []
     if tg_row:
-        tg_companies = [{
-            "id": tg_row.tg_id,
-            "name": tg_row.name,
-            "tax_no": tg_row.tax_no,
-            "tax_office": tg_row.tax_office,
-            "address": tg_row.address,
-            "city": tg_row.city,
-            "district": tg_row.district,
-            "phone": tg_row.phone,
-            "email": tg_row.email,
-        }]
+        try:
+            live = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": tg_row.tg_id})
+            if live and live.get("Id"):
+                tg_companies = [{
+                    "id": tg_row.tg_id,
+                    "name": tg_row.name,
+                    "tax_no": tg_row.tax_no,
+                    "tax_office": tg_row.tax_office,
+                    "address": tg_row.address,
+                    "city": tg_row.city,
+                    "district": tg_row.district,
+                    "phone": tg_row.phone,
+                    "email": tg_row.email,
+                }]
+            else:
+                # TeamGram'da artık yok — local DB'den de sil
+                db.delete(tg_row)
+                db.commit()
+                logger.info(f"Silinen TeamGram firması local DB'den temizlendi: {tg_row.tg_id}")
+        except Exception as e:
+            logger.warning(f"TeamGram canlı doğrulama hatası: {e}")
+            # Hata durumunda local DB'deki veriyi göster
+            tg_companies = [{
+                "id": tg_row.tg_id,
+                "name": tg_row.name,
+                "tax_no": tg_row.tax_no,
+                "tax_office": tg_row.tax_office,
+                "address": tg_row.address,
+                "city": tg_row.city,
+                "district": tg_row.district,
+                "phone": tg_row.phone,
+                "email": tg_row.email,
+            }]
 
     return {
         "vkn": vkn,
