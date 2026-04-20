@@ -18,33 +18,25 @@ def _delete_tg_company(tg_id: int):
         db.close()
 
 
-async def _sync_or_delete(tg_id: int):
-    """
-    Companies/Get ile firmayı kontrol et:
-    - Varsa → DB'ye upsert et
-    - Yoksa → DB'den sil
-    """
-    from app.services import teamgram
+def _upsert_from_payload(data: dict):
+    """Webhook payload'ındaki Data nesnesini doğrudan DB'ye yaz."""
     from app.services.tg_sync import _company_to_dict, _upsert
+    db = SessionLocal()
     try:
-        c = await teamgram._get(f"{teamgram.DOMAIN}/Companies/Get", {"id": tg_id})
-        if c and c.get("Id"):
-            db = SessionLocal()
-            try:
-                _upsert(db, _company_to_dict(c))
-                db.commit()
-                logger.info(f"TeamGram webhook: firma güncellendi tg_id={tg_id}")
-            finally:
-                db.close()
-        else:
-            _delete_tg_company(tg_id)
-    except Exception as e:
-        logger.error(f"TeamGram webhook sync hatası tg_id={tg_id}: {e}")
+        _upsert(db, _company_to_dict(data))
+        db.commit()
+        logger.info(f"TeamGram webhook: firma güncellendi tg_id={data.get('Id')}")
+    finally:
+        db.close()
 
 
 @router.post("/teamgram")
 async def teamgram_webhook(request: Request):
-    """TeamGram web kancası — Yeni/Güncelle/Sil olaylarını işler."""
+    """
+    TeamGram web kancası.
+    Payload yapısı:
+      { "Data": { ...firma... }, "EventAction": "New"|"Update"|"Delete", "EventEntity": "Party" }
+    """
     try:
         content_type = request.headers.get("content-type", "")
         if "json" in content_type:
@@ -53,25 +45,26 @@ async def teamgram_webhook(request: Request):
             form = await request.form()
             payload = dict(form)
 
-        logger.info(f"TeamGram webhook payload: {payload}")
+        logger.info(f"TeamGram webhook: EventAction={payload.get('EventAction')} EventEntity={payload.get('EventEntity')}")
 
-        tg_id_raw = payload.get("Id") or payload.get("id")
-        if not tg_id_raw:
+        event_entity = str(payload.get("EventEntity") or "").lower()
+        event_action = str(payload.get("EventAction") or "").lower()
+        data = payload.get("Data") or {}
+        tg_id = data.get("Id")
+
+        if not tg_id:
             return {"ok": True}
 
-        tg_id = int(tg_id_raw)
-
-        # Entity type kontrolü — sadece şirket olaylarını işle
-        entity_type = str(
-            payload.get("EntityType") or payload.get("entityType") or ""
-        ).lower()
-
-        if entity_type and "compan" not in entity_type and "şirket" not in entity_type:
-            logger.info(f"TeamGram webhook: şirket değil, atlandı (entity_type={entity_type})")
+        # Sadece şirket (Party) olaylarını işle
+        if event_entity and event_entity != "party":
+            logger.info(f"TeamGram webhook: şirket değil, atlandı (entity={event_entity})")
             return {"ok": True}
 
-        # Event tipinden bağımsız: Companies/Get ile doğrula, sonuca göre upsert/sil
-        await _sync_or_delete(tg_id)
+        if event_action == "delete":
+            _delete_tg_company(tg_id)
+        else:
+            # New, Update veya bilinmeyen → Data'yı doğrudan upsert et
+            _upsert_from_payload(data)
 
     except Exception as e:
         logger.error(f"TeamGram webhook hatası: {e}")
