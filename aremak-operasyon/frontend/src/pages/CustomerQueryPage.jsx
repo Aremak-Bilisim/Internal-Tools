@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Input, Button, Card, Spin, Empty, Tag, Tooltip, message, Divider, Space, Typography, Popconfirm, Segmented, Table } from 'antd'
+import { Input, Button, Card, Spin, Empty, Tag, Tooltip, message, Divider, Space, Typography, Popconfirm, Segmented } from 'antd'
 import {
   SearchOutlined, CopyOutlined, CheckCircleOutlined, CloseCircleOutlined,
   BankOutlined, ShopOutlined, PlusOutlined, SyncOutlined, LinkOutlined,
@@ -214,67 +214,8 @@ export default function CustomerQueryPage() {
       }]
   ) : []
 
-  // Name search table columns
-  const nameColumns = [
-    {
-      title: 'Firma Adı',
-      dataIndex: 'name',
-      key: 'name',
-      render: (text, row) => (
-        <span style={{ fontWeight: 500 }}>{text}</span>
-      ),
-    },
-    {
-      title: 'Vergi No',
-      key: 'tax_no',
-      width: 130,
-      render: (_, row) => {
-        const val = row.tax_no || row.tax_number
-        return val || <span style={{ color: '#ccc' }}>—</span>
-      },
-    },
-    {
-      title: 'İlçe / İl',
-      key: 'location',
-      width: 160,
-      render: (_, row) => {
-        const loc = [row.district, row.city].filter(Boolean).join(' / ')
-        return loc || <span style={{ color: '#ccc' }}>—</span>
-      },
-    },
-    {
-      title: 'Kaynak',
-      dataIndex: 'source',
-      key: 'source',
-      width: 110,
-      render: (src) => src === 'teamgram'
-        ? <Tag color="blue">TeamGram</Tag>
-        : <Tag color="purple">Paraşüt</Tag>,
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 120,
-      render: (_, row) => {
-        const href = row.source === 'teamgram'
-          ? `${TG_BASE}/parties/show?id=${row.id}&tab=-1`
-          : `${PARASUT_BASE}/contacts/${row.id}`
-        const label = row.source === 'teamgram' ? "TeamGram'da Aç" : "Paraşüt'te Aç"
-        return (
-          <Button size="small" icon={<LinkOutlined />} href={href} target="_blank">
-            {label}
-          </Button>
-        )
-      },
-    },
-  ]
-
-  const allNameRows = nameResults
-    ? [
-        ...(nameResults.teamgram || []).map(r => ({ ...r, source: 'teamgram', key: `tg-${r.id}` })),
-        ...(nameResults.parasut || []).map(r => ({ ...r, source: 'parasut', key: `ps-${r.id}` })),
-      ]
-    : []
+  const tgNameResults = nameResults?.teamgram || []
+  const psNameResults = nameResults?.parasut || []
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
@@ -411,16 +352,62 @@ export default function CustomerQueryPage() {
           {nameLoading && <Spin size="large" style={{ display: 'block', textAlign: 'center', marginTop: 40 }} />}
 
           {nameResults && !nameLoading && (
-            allNameRows.length > 0
-              ? <Table
-                  dataSource={allNameRows}
-                  columns={nameColumns}
-                  size="small"
-                  pagination={false}
-                  rowKey="key"
-                  bordered={false}
-                />
-              : <Empty description="Sonuç bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            tgNameResults.length === 0 && psNameResults.length === 0
+              ? <Empty description="Sonuç bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                  {/* TeamGram sonuçları */}
+                  <Card
+                    size="small"
+                    title={<><ShopOutlined style={{ marginRight: 6 }} />TeamGram</>}
+                    extra={tgNameResults.length > 0
+                      ? <Tag color="green" icon={<CheckCircleOutlined />}>{tgNameResults.length} Sonuç</Tag>
+                      : <Tag color="orange" icon={<CloseCircleOutlined />}>Sonuç Yok</Tag>}
+                  >
+                    {tgNameResults.length > 0 ? tgNameResults.map((c, i) => (
+                      <div key={c.id}>
+                        {i > 0 && <Divider style={{ margin: '8px 0' }} />}
+                        <Field label="Firma Adı" value={c.name} />
+                        <Field label="Vergi No" value={c.tax_no} />
+                        <Field label="İlçe / İl" value={[c.district, c.city].filter(Boolean).join(' / ') || null} />
+                        <Field label="Telefon" value={c.phone} />
+                        <Field label="E-Posta" value={c.email} />
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f5f5f5' }}>
+                          <Button size="small" icon={<LinkOutlined />}
+                            href={`${TG_BASE}/parties/show?id=${c.id}&tab=-1`} target="_blank">
+                            TeamGram'da Aç
+                          </Button>
+                        </div>
+                      </div>
+                    )) : <Empty description="Sonuç bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  </Card>
+
+                  {/* Paraşüt sonuçları */}
+                  <Card
+                    size="small"
+                    title="Paraşüt"
+                    extra={psNameResults.length > 0
+                      ? <Tag color="green" icon={<CheckCircleOutlined />}>{psNameResults.length} Sonuç</Tag>
+                      : <Tag color="orange" icon={<CloseCircleOutlined />}>Sonuç Yok</Tag>}
+                  >
+                    {psNameResults.length > 0 ? psNameResults.map((c, i) => (
+                      <div key={c.id}>
+                        {i > 0 && <Divider style={{ margin: '8px 0' }} />}
+                        <Field label="Firma Adı" value={c.name} />
+                        <Field label="Vergi No" value={c.tax_number} />
+                        <Field label="İlçe / İl" value={[c.district, c.city].filter(Boolean).join(' / ') || null} />
+                        <Field label="E-Posta" value={c.email} />
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f5f5f5' }}>
+                          <Button size="small" icon={<LinkOutlined />}
+                            href={`${PARASUT_BASE}/contacts/${c.id}`} target="_blank">
+                            Paraşüt'te Aç
+                          </Button>
+                        </div>
+                      </div>
+                    )) : <Empty description="Sonuç bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  </Card>
+
+                </div>
           )}
         </>
       )}
