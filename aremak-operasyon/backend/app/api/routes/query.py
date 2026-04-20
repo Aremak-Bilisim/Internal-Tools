@@ -1,13 +1,85 @@
 import asyncio
+import httpx
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.teamgram_company import TeamgramCompany
 from app.services import parasut
+from app.services.parasut import _get_token, BASE, COMPANY
+from app.services import teamgram as tg_svc
+from app.services.tg_sync import _company_to_dict, _upsert
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _build_address_str(gib: dict) -> str:
+    """GİB adres bilgisinden tek satır adres üretir."""
+    infos = gib.get("addressInformation") or []
+    if not infos:
+        return ""
+    a = infos[0]
+    parts = [
+        a.get("neighborhood") or "",
+        a.get("street") or "",
+        (f"No:{a.get('exteriorDoorNumber', '')} "
+         f"{('İç:' + a['interiorDoorNo']) if a.get('interiorDoorNo') else ''}").strip() or "",
+        a.get("county") or "",
+        a.get("city") or "",
+    ]
+    return " ".join(p for p in parts if p).strip()
+
+
+def _gib_to_parasut_attrs(gib: dict) -> dict:
+    infos = gib.get("addressInformation") or [{}]
+    a = infos[0]
+    address_parts = [
+        a.get("neighborhood") or "",
+        a.get("street") or "",
+        (f"No:{a.get('exteriorDoorNumber', '')} "
+         f"{('İç:' + a['interiorDoorNo']) if a.get('interiorDoorNo') else ''}").strip() or "",
+    ]
+    return {
+        "name": gib.get("identityTitle") or gib.get("title") or "",
+        "tax_number": gib.get("taxIdentificationNumber") or "",
+        "tax_office": gib.get("taxOfficeName") or "",
+        "city": a.get("city") or "",
+        "district": a.get("county") or "",
+        "address": " ".join(p for p in address_parts if p).strip(),
+        "account_type": "customer",
+        "contact_type": "company",
+    }
+
+
+def _gib_to_tg_payload(gib: dict, tg_id: Optional[int] = None) -> dict:
+    infos = gib.get("addressInformation") or [{}]
+    a = infos[0]
+    address = _build_address_str(gib)
+    payload: dict = {
+        "Name": gib.get("identityTitle") or gib.get("title") or "",
+        "TaxNo": gib.get("taxIdentificationNumber") or "",
+        "TaxOffice": gib.get("taxOfficeName") or "",
+        "CityName": a.get("city") or "",
+        "StateName": a.get("county") or "",
+        "BasicRelationTypes": ["Customer"],
+    }
+    if address:
+        payload["ContactInfoList"] = [{"Type": "Address", "Value": address}]
+    if tg_id is not None:
+        payload["Id"] = tg_id
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# GET /taxpayer/{vkn}  — sorgulama
+# ---------------------------------------------------------------------------
 
 @router.get("/taxpayer/{vkn}")
 async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -16,8 +88,6 @@ async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=D
     # 1. GİB vergi mükellefi bilgisi (Paraşüt taxpayer_data)
     gib_data = None
     try:
-        import httpx
-        from app.services.parasut import _get_token, BASE, COMPANY
         token = await _get_token()
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
@@ -26,14 +96,12 @@ async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=D
             )
             if r.status_code == 200:
                 gib_data = r.json()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"GİB sorgusu başarısız: {e}")
 
     # 2. Paraşüt müşteri kaydı (VKN ile)
     parasut_contact = None
     try:
-        from app.services.parasut import _get_token, BASE, COMPANY
-        import httpx
         token = await _get_token()
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
@@ -56,8 +124,8 @@ async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=D
                         "email": a.get("email"),
                         "account_type": a.get("account_type"),
                     }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Paraşüt sorgusu başarısız: {e}")
 
     # 3. TeamGram — local DB'den anında sorgula
     tg_row = db.query(TeamgramCompany).filter(TeamgramCompany.tax_no == vkn).first()
@@ -82,6 +150,128 @@ async def query_customer(vkn: str, db: Session = Depends(get_db), current_user=D
         "teamgram": tg_companies,
     }
 
+
+# ---------------------------------------------------------------------------
+# POST /parasut/add  — Paraşüt'e yeni müşteri ekle
+# ---------------------------------------------------------------------------
+
+@router.post("/parasut/add")
+async def add_to_parasut(body: dict, current_user=Depends(get_current_user)):
+    gib = body.get("gib")
+    if not gib:
+        raise HTTPException(400, "GİB verisi eksik")
+    attrs = _gib_to_parasut_attrs(gib)
+    try:
+        token = await _get_token()
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{BASE}/v4/{COMPANY}/contacts",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"data": {"type": "contacts", "attributes": attrs}}
+            )
+            if r.status_code not in (200, 201):
+                raise HTTPException(502, f"Paraşüt hatası: {r.text[:200]}")
+            data = r.json().get("data", {})
+            return {"ok": True, "id": data.get("id"), "name": data.get("attributes", {}).get("name")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Paraşüt ekleme hatası: {e}")
+        raise HTTPException(502, str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /parasut/{contact_id}/update  — Paraşüt kaydını GİB ile güncelle
+# ---------------------------------------------------------------------------
+
+@router.post("/parasut/{contact_id}/update")
+async def update_parasut(contact_id: str, body: dict, current_user=Depends(get_current_user)):
+    gib = body.get("gib")
+    if not gib:
+        raise HTTPException(400, "GİB verisi eksik")
+    attrs = _gib_to_parasut_attrs(gib)
+    # account_type güncelleme sırasında göndermiyoruz (Paraşüt değişime izin vermez)
+    attrs.pop("account_type", None)
+    attrs.pop("contact_type", None)
+    try:
+        token = await _get_token()
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.put(
+                f"{BASE}/v4/{COMPANY}/contacts/{contact_id}",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"data": {"id": contact_id, "type": "contacts", "attributes": attrs}}
+            )
+            if r.status_code not in (200, 201):
+                raise HTTPException(502, f"Paraşüt hatası: {r.text[:200]}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Paraşüt güncelleme hatası: {e}")
+        raise HTTPException(502, str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /teamgram/add  — TeamGram'a yeni firma ekle
+# ---------------------------------------------------------------------------
+
+@router.post("/teamgram/add")
+async def add_to_teamgram(body: dict, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    gib = body.get("gib")
+    if not gib:
+        raise HTTPException(400, "GİB verisi eksik")
+    payload = _gib_to_tg_payload(gib)
+    try:
+        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Create", payload)
+        if not result or not result.get("Result"):
+            msg = result.get("Message", "Bilinmeyen hata") if result else "Yanıt alınamadı"
+            raise HTTPException(502, f"TeamGram hatası: {msg}")
+        new_id = result.get("Id")
+        # Local DB'ye de ekle
+        if new_id:
+            c = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": new_id})
+            if c and c.get("Id"):
+                _upsert(db, _company_to_dict(c))
+                db.commit()
+        return {"ok": True, "id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TeamGram ekleme hatası: {e}")
+        raise HTTPException(502, str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /teamgram/{tg_id}/update  — TeamGram firmasını GİB ile güncelle
+# ---------------------------------------------------------------------------
+
+@router.post("/teamgram/{tg_id}/update")
+async def update_teamgram(tg_id: int, body: dict, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    gib = body.get("gib")
+    if not gib:
+        raise HTTPException(400, "GİB verisi eksik")
+    payload = _gib_to_tg_payload(gib, tg_id=tg_id)
+    try:
+        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Edit", payload)
+        if not result or not result.get("Result"):
+            msg = result.get("Message", "Bilinmeyen hata") if result else "Yanıt alınamadı"
+            raise HTTPException(502, f"TeamGram hatası: {msg}")
+        # Local DB güncelle
+        c = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": tg_id})
+        if c and c.get("Id"):
+            _upsert(db, _company_to_dict(c))
+            db.commit()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TeamGram güncelleme hatası: {e}")
+        raise HTTPException(502, str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /tg-sync-status
+# ---------------------------------------------------------------------------
 
 @router.get("/tg-sync-status")
 def tg_sync_status(db: Session = Depends(get_db), current_user=Depends(get_current_user)):

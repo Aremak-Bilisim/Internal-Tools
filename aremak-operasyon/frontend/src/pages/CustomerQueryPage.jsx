@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
-import { Input, Button, Card, Spin, Empty, Tag, Tooltip, message, Divider, Space, Typography } from 'antd'
+import { Input, Button, Card, Spin, Empty, Tag, Tooltip, message, Divider, Space, Typography, Popconfirm } from 'antd'
 import {
   SearchOutlined, CopyOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  BankOutlined, ShopOutlined,
+  BankOutlined, ShopOutlined, PlusOutlined, SyncOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 
@@ -53,14 +53,15 @@ export default function CustomerQueryPage() {
   const [vkn, setVkn] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [actionLoading, setActionLoading] = useState({})
 
-  const handleSearch = async () => {
-    const v = vkn.trim()
-    if (!v) return
+  const handleSearch = async (v = null) => {
+    const q = (v ?? vkn).trim()
+    if (!q) return
     setLoading(true)
     setResult(null)
     try {
-      const r = await api.get(`/query/taxpayer/${v}`)
+      const r = await api.get(`/query/taxpayer/${q}`)
       setResult(r.data)
     } catch {
       message.error('Sorgulama başarısız')
@@ -69,9 +70,84 @@ export default function CustomerQueryPage() {
     }
   }
 
+  const doAction = async (key, endpoint, body) => {
+    setActionLoading(prev => ({ ...prev, [key]: true }))
+    try {
+      await api.post(endpoint, body)
+      message.success('İşlem başarılı')
+      // Kartları yenile
+      handleSearch(result?.vkn)
+    } catch (e) {
+      const detail = e?.response?.data?.detail || 'İşlem başarısız'
+      message.error(detail)
+    } finally {
+      setActionLoading(prev => ({ ...prev, [key]: false }))
+    }
+  }
+
   const gib = result?.gib
   const parasut = result?.parasut
   const tgList = result?.teamgram || []
+
+  // Aksiyon butonları
+  const ActionBar = ({ actions }) => (
+    <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f5f5f5', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {actions.map(({ key, label, icon, danger, endpoint, body }) => (
+        <Popconfirm
+          key={key}
+          title={label}
+          description={`Bu işlemi onaylıyor musunuz?`}
+          okText="Evet"
+          cancelText="Hayır"
+          onConfirm={() => doAction(key, endpoint, body)}
+        >
+          <Button
+            size="small"
+            type={danger ? 'default' : 'primary'}
+            ghost={!danger}
+            icon={icon}
+            loading={!!actionLoading[key]}
+          >
+            {label}
+          </Button>
+        </Popconfirm>
+      ))}
+    </div>
+  )
+
+  const parasutActions = gib ? (parasut
+    ? [{
+        key: 'parasut-update',
+        label: 'GİB ile Güncelle',
+        icon: <SyncOutlined />,
+        endpoint: `/query/parasut/${parasut.id}/update`,
+        body: { gib },
+      }]
+    : [{
+        key: 'parasut-add',
+        label: "Paraşüt'e Ekle",
+        icon: <PlusOutlined />,
+        endpoint: '/query/parasut/add',
+        body: { gib },
+      }]
+  ) : []
+
+  const tgActions = gib ? (tgList.length > 0
+    ? tgList.map((c, i) => ({
+        key: `tg-update-${c.id}`,
+        label: tgList.length > 1 ? `GİB ile Güncelle (${c.name})` : 'GİB ile Güncelle',
+        icon: <SyncOutlined />,
+        endpoint: `/query/teamgram/${c.id}/update`,
+        body: { gib },
+      }))
+    : [{
+        key: 'tg-add',
+        label: "TeamGram'a Ekle",
+        icon: <PlusOutlined />,
+        endpoint: '/query/teamgram/add',
+        body: { gib },
+      }]
+  ) : []
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
@@ -82,10 +158,10 @@ export default function CustomerQueryPage() {
           placeholder="Vergi Kimlik Numarası (VKN)"
           value={vkn}
           onChange={e => setVkn(e.target.value)}
-          onPressEnter={handleSearch}
+          onPressEnter={() => handleSearch()}
           size="large"
         />
-        <Button type="primary" size="large" icon={<SearchOutlined />} onClick={handleSearch} loading={loading}>
+        <Button type="primary" size="large" icon={<SearchOutlined />} onClick={() => handleSearch()} loading={loading}>
           Sorgula
         </Button>
       </Space.Compact>
@@ -143,6 +219,7 @@ export default function CustomerQueryPage() {
                 <Field label="Hesap Türü" value={parasut.account_type === 'customer' ? 'Müşteri' : parasut.account_type} />
               </>
             ) : <Empty description="Bu VKN ile Paraşüt'te kayıtlı müşteri bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            {parasutActions.length > 0 && <ActionBar actions={parasutActions} />}
           </Card>
 
           {/* TeamGram */}
@@ -166,7 +243,8 @@ export default function CustomerQueryPage() {
                   <Field label="E-Posta" value={c.email} />
                 </div>
               ))
-            ) : <Empty description="Bu firma adıyla TeamGram'da kayıt bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            ) : <Empty description="Bu VKN ile TeamGram'da kayıt bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            {tgActions.length > 0 && <ActionBar actions={tgActions} />}
           </Card>
 
         </div>

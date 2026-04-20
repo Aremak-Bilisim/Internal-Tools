@@ -29,6 +29,15 @@ async def _get_v1(path: str, params: dict = None) -> dict:
         return r.json()
 
 
+async def _post(path: str, payload: dict) -> dict:
+    """TeamGram'a POST isteği gönderir. path örnek: '{DOMAIN}/Companies/Create'"""
+    url = f"{BASE}/{path}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
 async def get_products(page: int = 1, pagesize: int = 50) -> dict:
     return await _get(f"{DOMAIN}/Products/Index", {"page": page, "pagesize": pagesize})
 
