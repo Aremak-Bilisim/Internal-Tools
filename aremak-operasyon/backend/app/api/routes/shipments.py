@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
 from app.models.shipment import ShipmentRequest, ShipmentHistory
 from app.models.user import User
+from app.models.notification import Notification
 from app.services import email as email_svc
 from app.services import teamgram
 from app.services import parasut
@@ -189,12 +190,21 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
     warnings = []
 
     # 1. Notify admins (shipment created directly as pending_admin)
+    admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+    admin_list = [(email_svc._notif_email(u), u.name) for u in admins]
     try:
-        admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
-        admin_list = [(email_svc._notif_email(u), u.name) for u in admins]
         email_svc.send_pending_admin(shipment, admin_list, note=shipment.get("notes") or "")
     except Exception as e:
-        logger.error(f"Admin notification failed: {e}")
+        logger.error(f"Admin email failed: {e}")
+    try:
+        order_name = shipment.get("tg_order_name") or shipment.get("customer_name")
+        for u in admins:
+            db.add(Notification(user_id=u.id, title=f"Yeni Sevk Talebi: {order_name}",
+                                message=shipment.get("notes") or "Onayınızı bekliyor.",
+                                shipment_id=shipment.get("id")))
+        db.commit()
+    except Exception as e:
+        logger.error(f"Admin in-app notification failed: {e}")
 
     # 2. Update TeamGram order: Status=1 (Tamamlandı), stage=Hazırlanıyor
     if tg_order_id:
@@ -311,30 +321,57 @@ def advance_stage(
     db.commit()
     db.refresh(s)
 
-    # Email notifications
-    try:
-        shipment_dict = _shipment_to_dict(s)
-        admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
-        warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
-        sales_users = db.query(User).filter(User.role == "sales", User.is_active == True).all()
+    # Email + in-app notifications
+    shipment_dict = _shipment_to_dict(s)
+    admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+    warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
+    sales_users = db.query(User).filter(User.role == "sales", User.is_active == True).all()
 
-        admin_list = [(email_svc._notif_email(u), u.name) for u in admins]
-        warehouse_list = [(email_svc._notif_email(u), u.name) for u in warehouse_users]
-        sales_list = [(email_svc._notif_email(u), u.name) for u in sales_users]
+    admin_list = [(email_svc._notif_email(u), u.name) for u in admins]
+    warehouse_list = [(email_svc._notif_email(u), u.name) for u in warehouse_users]
+    sales_list = [(email_svc._notif_email(u), u.name) for u in sales_users]
 
-        note = data.note or ""
-        if new_stage == "pending_admin":
+    order_name = s.tg_order_name or s.customer_name
+    note = data.note or ""
+
+    def _create_notifs(users, title, message):
+        try:
+            for u in users:
+                db.add(Notification(user_id=u.id, title=title, message=message, shipment_id=s.id))
+            db.commit()
+        except Exception as e:
+            logger.error(f"In-app notification failed: {e}")
+
+    if new_stage == "pending_admin":
+        try:
             email_svc.send_pending_admin(shipment_dict, admin_list, note)
-        elif new_stage == "parasut_review":
+        except Exception as e:
+            logger.error(f"Email failed ({new_stage}): {e}")
+        _create_notifs(admins, f"Yeni Sevk Talebi: {order_name}", note or "Onayınızı bekliyor.")
+    elif new_stage == "parasut_review":
+        try:
             email_svc.send_approved_to_warehouse(shipment_dict, warehouse_list, note, actor_name=current_user.name)
-        elif new_stage == "pending_parasut_approval":
+        except Exception as e:
+            logger.error(f"Email failed ({new_stage}): {e}")
+        _create_notifs(warehouse_users, f"Paraşüt Kontrolü: {order_name}", f"{current_user.name} onayladı. {note}".strip())
+    elif new_stage == "pending_parasut_approval":
+        try:
             email_svc.send_waybill_approval_request(shipment_dict, admin_list, note, actor_name=current_user.name)
-        elif new_stage == "preparing":
+        except Exception as e:
+            logger.error(f"Email failed ({new_stage}): {e}")
+        _create_notifs(admins, f"Paraşüt Belgesi Onayı: {order_name}", f"{current_user.name} kontrolü tamamladı. {note}".strip())
+    elif new_stage == "preparing":
+        try:
             email_svc.send_ready_to_ship(shipment_dict, warehouse_list, note, actor_name=current_user.name)
-        elif new_stage == "shipped":
+        except Exception as e:
+            logger.error(f"Email failed ({new_stage}): {e}")
+        _create_notifs(warehouse_users, f"Sevke Hazırla: {order_name}", f"{current_user.name} Paraşüt'ü onayladı. {note}".strip())
+    elif new_stage == "shipped":
+        try:
             email_svc.send_shipped(shipment_dict, admin_list, sales_list, note)
-    except Exception as e:
-        logger.error(f"Stage transition email failed ({old_stage} → {new_stage}): {e}")
+        except Exception as e:
+            logger.error(f"Email failed ({new_stage}): {e}")
+        _create_notifs(admins + sales_users, f"Sevk Edildi: {order_name}", note or "Ürün sevk edildi.")
 
     # TeamGram sync: sevk edilince sipariş aşamasını güncelle
     if new_stage == "shipped" and s.tg_order_id:

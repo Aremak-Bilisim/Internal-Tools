@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Layout, Menu, Button, Avatar, Dropdown, Typography } from 'antd'
+import React, { useState, useEffect, useRef } from 'react'
+import { Layout, Menu, Button, Avatar, Dropdown, Typography, Badge, Popover, List, Empty } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   DashboardOutlined,
@@ -8,8 +8,10 @@ import {
   SendOutlined,
   LogoutOutlined,
   UserOutlined,
+  BellOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
+import api from '../services/api'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -26,6 +28,84 @@ export default function AppLayout() {
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const [collapsed, setCollapsed] = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [notifOpen, setNotifOpen] = useState(false)
+  const pollRef = useRef(null)
+
+  const loadNotifications = () => {
+    api.get('/notifications').then(r => setNotifications(r.data)).catch(() => {})
+  }
+
+  useEffect(() => {
+    loadNotifications()
+    pollRef.current = setInterval(loadNotifications, 30000)
+    return () => clearInterval(pollRef.current)
+  }, [])
+
+  const unreadCount = notifications.filter(n => !n.is_read).length
+
+  const markAllRead = () => {
+    api.post('/notifications/read-all').then(() => {
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
+    })
+  }
+
+  const handleNotifClick = (notif) => {
+    if (!notif.is_read) {
+      api.post(`/notifications/${notif.id}/read`).then(() => {
+        setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n))
+      })
+    }
+    if (notif.shipment_id) {
+      navigate(`/shipments/${notif.shipment_id}`)
+      setNotifOpen(false)
+    }
+  }
+
+  const notifContent = (
+    <div style={{ width: 320 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <Typography.Text strong>Bildirimler</Typography.Text>
+        {unreadCount > 0 && (
+          <Button type="link" size="small" onClick={markAllRead} style={{ padding: 0 }}>
+            Tümünü okundu işaretle
+          </Button>
+        )}
+      </div>
+      {notifications.length === 0 ? (
+        <Empty description="Bildirim yok" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      ) : (
+        <List
+          dataSource={notifications}
+          style={{ maxHeight: 400, overflowY: 'auto' }}
+          renderItem={(n) => (
+            <List.Item
+              onClick={() => handleNotifClick(n)}
+              style={{
+                cursor: n.shipment_id ? 'pointer' : 'default',
+                background: n.is_read ? 'transparent' : '#e6f4ff',
+                padding: '8px 12px',
+                borderRadius: 6,
+                marginBottom: 4,
+              }}
+            >
+              <List.Item.Meta
+                title={<Typography.Text style={{ fontSize: 13, fontWeight: n.is_read ? 400 : 600 }}>{n.title}</Typography.Text>}
+                description={
+                  <div>
+                    {n.message && <div style={{ fontSize: 12, color: '#666' }}>{n.message}</div>}
+                    <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                      {n.created_at ? new Date(n.created_at.endsWith('Z') ? n.created_at : n.created_at + 'Z').toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                    </div>
+                  </div>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      )}
+    </div>
+  )
 
   const userMenu = {
     items: [{ key: 'logout', icon: <LogoutOutlined />, label: 'Çıkış Yap', danger: true }],
@@ -51,7 +131,12 @@ export default function AppLayout() {
       </Sider>
 
       <Layout>
-        <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderBottom: '1px solid #f0f0f0' }}>
+        <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, borderBottom: '1px solid #f0f0f0' }}>
+          <Popover content={notifContent} trigger="click" open={notifOpen} onOpenChange={setNotifOpen} placement="bottomRight">
+            <Badge count={unreadCount} size="small">
+              <Button type="text" icon={<BellOutlined style={{ fontSize: 18 }} />} />
+            </Badge>
+          </Popover>
           <Dropdown menu={userMenu} placement="bottomRight">
             <Button type="text" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Avatar size="small" icon={<UserOutlined />} />
