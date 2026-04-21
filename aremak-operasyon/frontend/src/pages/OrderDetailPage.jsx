@@ -1,10 +1,22 @@
 import React, { useEffect, useState } from 'react'
 import {
-  Card, Descriptions, Tag, Button, Typography, Spin, Divider, Table, message, Popconfirm,
+  Card, Descriptions, Tag, Button, Typography, Spin, Divider, Table, message, Popconfirm, Space,
 } from 'antd'
 import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined, FilePdfOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import api from '../services/api'
+
+const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
+
+const parseTgNumber = (val) => {
+  if (val == null || val === '') return NaN
+  const s = String(val).trim()
+  const lastComma = s.lastIndexOf(',')
+  const lastPeriod = s.lastIndexOf('.')
+  if (lastComma === -1 && lastPeriod === -1) return parseFloat(s)
+  if (lastComma > lastPeriod) return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+  return parseFloat(s.replace(/,/g, ''))
+}
 
 const { Title, Text } = Typography
 
@@ -145,6 +157,11 @@ export default function OrderDetailPage() {
   const odemeVal = parseCfSelectId(cfById['193501'])
   const odemeDurumu = odemeVal === '14858' ? 'Ödendi' : odemeVal === '14859' ? 'Ödenecek' : '-'
   const beklenenTarih = cfById['193502']?.UnFormattedDate || cfById['193502']?.Value?.slice(0, 10) || '-'
+  const odemeTutariParsed = parseTgNumber(cfById['193526']?.Value)
+  const odemeTutari = !isNaN(odemeTutariParsed) ? odemeTutariParsed : null
+  const odemePbRaw = (() => { try { return JSON.parse(cfById['193527']?.Value ?? 'null')?.Value } catch { return null } })()
+  let odemeBelgeleri = null
+  try { odemeBelgeleri = JSON.parse(cfById['193472']?.Value || 'null') } catch {}
 
   const itemColumns = [
     { title: 'Ürün', key: 'name', render: (_, r) => r.Product?.Displayname || r.Title || '-' },
@@ -198,7 +215,30 @@ export default function OrderDetailPage() {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Beklenen Ödeme Tarihi">{beklenenTarih}</Descriptions.Item>
+              {odemeTutari != null && (
+                <Descriptions.Item label="Ödeme Tutarı">
+                  {odemeTutari.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} {odemePbRaw || ''}
+                </Descriptions.Item>
+              )}
             </Descriptions>
+            {odemeBelgeleri?.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <Typography.Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Ödeme Belgesi</Typography.Text>
+                <Space wrap>
+                  {odemeBelgeleri.map((b, i) => (
+                    <a key={i} href={attachmentUrl(b.Url)} target="_blank" rel="noreferrer">
+                      <img
+                        src={attachmentUrl(b.Url)}
+                        alt={b.FileName}
+                        style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', objectFit: 'cover', display: 'block' }}
+                        onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }}
+                      />
+                      <div style={{ display: 'none', fontSize: 11, color: '#1677ff' }}>{b.FileName}</div>
+                    </a>
+                  ))}
+                </Space>
+              </div>
+            )}
           </Card>
 
           {/* Fatura Bilgileri */}
