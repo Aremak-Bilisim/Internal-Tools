@@ -12,7 +12,7 @@ import { useAuthStore } from '../store/auth'
 const { Title, Text } = Typography
 const { TextArea } = Input
 
-const proxyUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
+const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
 
 const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }
 const STATUS_LABELS = { 0: 'Açık', 1: 'Tamamlandı', 2: 'İptal' }
@@ -878,11 +878,11 @@ export default function OrdersPage() {
                         return (
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             {belgeler.map((b, i) => (
-                              <a key={i} href={proxyUrl(b.Url)} target="_blank" rel="noreferrer">
+                              <a key={i} href={attachmentUrl(b.Url)} target="_blank" rel="noreferrer">
                                 <img
-                                  src={proxyUrl(b.Url)}
+                                  src={attachmentUrl(b.Url)}
                                   alt={b.FileName}
-                                  style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
+                                  style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer', display: 'block' }}
                                   onError={e => { e.target.style.display = 'none' }}
                                 />
                                 <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>

@@ -8,7 +8,7 @@ import { useAuthStore } from '../store/auth'
 
 const CARGO_COMPANIES = ['Yurtiçi Kargo', 'Aras Kargo', 'MNG Kargo', 'PTT Kargo', 'Sürat Kargo', 'DHL', 'UPS']
 
-const proxyUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
+const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -658,15 +658,12 @@ export default function ShipmentDetailPage() {
                     <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Ödeme Belgesi</Text>
                     <Space wrap>
                       {odemeBelgeleri.map((b, i) => (
-                        <a key={i} href={proxyUrl(b.Url)} target="_blank" rel="noreferrer">
+                        <a key={i} href={attachmentUrl(b.Url)} target="_blank" rel="noreferrer">
                           <img
-                            src={proxyUrl(b.Url)}
+                            src={attachmentUrl(b.Url)}
                             alt={b.FileName}
-                            style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', objectFit: 'cover' }}
-                            onError={e => {
-                              e.target.style.display = 'none'
-                              e.target.nextSibling.style.display = 'block'
-                            }}
+                            style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', objectFit: 'cover', display: 'block' }}
+                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }}
                           />
                           <div style={{ display: 'none', fontSize: 11, color: '#1677ff' }}>{b.FileName}</div>
                         </a>
@@ -977,11 +974,11 @@ export default function ShipmentDetailPage() {
                     {editOdemeDoc?.length ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {editOdemeDoc.map((b, i) => (
-                          <a key={i} href={proxyUrl(b.Url)} target="_blank" rel="noreferrer">
+                          <a key={i} href={attachmentUrl(b.Url)} target="_blank" rel="noreferrer">
                             <img
-                              src={proxyUrl(b.Url)}
+                              src={attachmentUrl(b.Url)}
                               alt={b.FileName}
-                              style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
+                              style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer', display: 'block' }}
                               onError={e => { e.target.style.display = 'none' }}
                             />
                             <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>

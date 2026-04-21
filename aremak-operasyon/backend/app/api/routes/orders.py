@@ -66,8 +66,12 @@ async def get_order_weblink(order_id: int, current_user=Depends(get_current_user
 
 
 @router.get("/proxy/attachment")
-async def proxy_attachment(url: str, current_user=Depends(get_current_user)):
-    """TeamGram dosya URL'lerini token ile proxy üzerinden sun"""
+async def proxy_attachment(url: str):
+    """TeamGram dosya URL'lerini proxy üzerinden sun (sadece TeamGram domain'i)."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.hostname not in ("api.teamgram.com", "teamgram.com", "cdn.teamgram.com"):
+        raise HTTPException(status_code=400, detail="Geçersiz URL")
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
             resp = await client.get(url, headers={"Token": settings.TEAMGRAM_TOKEN})
