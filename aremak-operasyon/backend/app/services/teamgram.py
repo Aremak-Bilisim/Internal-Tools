@@ -197,7 +197,13 @@ async def update_order_custom_fields(order_id: int, field_updates: dict) -> bool
     """
     field_updates: {custom_field_id: value_string}
     Fetches the full order, patches CustomFieldDatas, then POSTs back.
+
+    Attachment-type custom fields (193472 gibi) Orders/Edit ile gönderilince
+    TeamGram tarafından temizlenebilir. Bu yüzden bu alanları, field_updates'de
+    açıkça belirtilmedikçe Edit payload'ından çıkarıyoruz.
     """
+    ATTACHMENT_CF_IDS = {193472}
+
     order = await get_order(order_id)
     order["RelatedEntityId"] = order.get("RelatedEntity", {}).get("Id")
 
@@ -211,6 +217,9 @@ async def update_order_custom_fields(order_id: int, field_updates: dict) -> bool
         else:
             if cf_id not in existing_ids:
                 cfd.append({"CustomFieldId": cf_id, "Value": value})
+
+    # Attachment alanlarını field_updates'de yoksa payload'dan çıkar
+    cfd = [f for f in cfd if f["CustomFieldId"] not in ATTACHMENT_CF_IDS or f["CustomFieldId"] in field_updates]
     order["CustomFieldDatas"] = cfd
 
     url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
