@@ -70,6 +70,7 @@ export default function ShipmentsPage() {
   const [counts, setCounts] = useState({})
   const [loading, setLoading] = useState(true)
   const [activeStage, setActiveStage] = useState('all')
+  const [usersByRole, setUsersByRole] = useState({})
 
   const loadAll = () => {
     api.get('/shipments').then((r) => {
@@ -89,7 +90,17 @@ export default function ShipmentsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    loadAll()
+    api.get('/users').then((r) => {
+      const byRole = {}
+      r.data.forEach((u) => {
+        if (!byRole[u.role]) byRole[u.role] = []
+        byRole[u.role].push(u.name)
+      })
+      setUsersByRole(byRole)
+    }).catch(() => {})
+  }, [])
   useEffect(() => { load() }, [activeStage])
 
   // Giriş yapan kullanıcının aksiyonunu bekleyen talepler
@@ -133,7 +144,8 @@ export default function ShipmentsPage() {
             </span>
           )
         }
-        return <Text type="secondary" style={{ fontSize: 12 }}>{STAGE_ACTOR_LABEL[r.stage]}</Text>
+        const actorNames = usersByRole[actor]?.join(', ') || STAGE_ACTOR_LABEL[r.stage]
+        return <Text type="secondary" style={{ fontSize: 12 }}>{actorNames}</Text>
       },
     },
     { title: 'Oluşturan', key: 'created_by', render: (_, r) => r.created_by?.name || '-' },
