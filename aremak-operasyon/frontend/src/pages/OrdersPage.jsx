@@ -354,7 +354,8 @@ export default function OrdersPage() {
       try { odemeBelgesi = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
 
       // 193526: Ödeme Tutarı (number)
-      const odemeTutariVal = cfById[193526]?.Value ? Number(cfById[193526].Value) : undefined
+      const odemeTutariParsed = parseFloat(cfById[193526]?.Value)
+      const odemeTutariVal = !isNaN(odemeTutariParsed) ? odemeTutariParsed : undefined
 
       // 193527: Ödeme Para Birimi (select: 14860=TRL, 14861=USD, 14862=EUR)
       let odemePbId = undefined
