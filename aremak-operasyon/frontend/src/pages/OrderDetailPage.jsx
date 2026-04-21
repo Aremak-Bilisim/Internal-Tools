@@ -292,7 +292,7 @@ export default function OrderDetailPage() {
                 <Button
                   icon={<ExportOutlined />}
                   size="small"
-                  href={irsaliye?.url || `https://uygulama.parasut.com/627949/irsaliyeler/${shipment.irsaliye_id}`}
+                  href={irsaliye?.url || `https://uygulama.parasut.com/627949/giden-irsaliyeler/${shipment.irsaliye_id}`}
                   target="_blank"
                   rel="noreferrer"
                 >

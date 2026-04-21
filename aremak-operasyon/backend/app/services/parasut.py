@@ -283,7 +283,7 @@ async def get_irsaliye_info(irsaliye_id: str) -> Optional[dict]:
         "issue_date": attrs.get("issue_date"),
         "shipment_date": attrs.get("shipment_date"),
         "contact_name": contact_name,
-        "url": f"https://uygulama.parasut.com/{COMPANY}/irsaliyeler/{irsaliye_id}",
+        "url": f"https://uygulama.parasut.com/{COMPANY}/giden-irsaliyeler/{irsaliye_id}",
     }
 
 
