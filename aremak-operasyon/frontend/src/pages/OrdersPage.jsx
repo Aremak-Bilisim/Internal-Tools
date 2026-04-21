@@ -14,6 +14,13 @@ const { TextArea } = Input
 
 const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
 
+const parseTgNumber = (val) => {
+  if (val == null || val === '') return NaN
+  const s = String(val).trim()
+  if (s.includes(',')) return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+  return parseFloat(s)
+}
+
 const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }
 const STATUS_LABELS = { 0: 'Açık', 1: 'Tamamlandı', 2: 'İptal' }
 
@@ -354,7 +361,7 @@ export default function OrdersPage() {
       try { odemeBelgesi = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
 
       // 193526: Ödeme Tutarı (number)
-      const odemeTutariParsed = parseFloat(cfById[193526]?.Value)
+      const odemeTutariParsed = parseTgNumber(cfById[193526]?.Value)
       const odemeTutariVal = !isNaN(odemeTutariParsed) ? odemeTutariParsed : undefined
 
       // 193527: Ödeme Para Birimi (select: 14860=TRL, 14861=USD, 14862=EUR)
