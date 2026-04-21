@@ -147,11 +147,23 @@ Müşteri
 - `_company_to_dict`'te Türkçe büyük/küçük harf sorunu: `"İş".lower()` ≠ `"iş"` olduğu için exact match seti kullanılır
 
 #### Özel alanlar (custom fields)
-| Alan | CustomFieldId |
-|---|---|
-| Müşteri Tipi | 192253 |
-| İndirim Seviyesi (%) | 192610 |
-| Kullanıcı Tipi | 192611 |
+| Alan | CustomFieldId | Tip | Notlar |
+|---|---|---|---|
+| Müşteri Tipi | 192253 | select | — |
+| İndirim Seviyesi (%) | 192610 | number | — |
+| Kullanıcı Tipi | 192611 | select | — |
+
+#### Sipariş custom fields (ödeme / sevk)
+| Alan | CustomFieldId | Tip | Seçenekler |
+|---|---|---|---|
+| Ödeme Durumu | 193501 | select | 14858=Ödendi, 14859=Ödenecek |
+| Beklenen Ödeme Tarihi | 193502 | date | `UnFormattedDate` veya `Value` (YYYY-MM-DD) |
+| Ödeme Belgesi | 193472 | attachment | JSON array `[{Url, FileName, ...}]` |
+| Ödeme Tutarı | 193526 | number | raw string değer |
+| Ödeme Para Birimi | 193527 | select | 14860=TRL, 14861=USD, 14862=EUR |
+
+**Okuma:** select → `JSON.parse(cf.Value).Id`, number → `cf.Value` (string → Number), attachment → `JSON.parse(cf.Value)`
+**Yazma:** select → option ID string (ör. `"14858"`), number → string (ör. `"1500"`), date → `"YYYY-MM-DD"`
 
 #### Webhook
 - URL: `POST /api/webhook/teamgram`
@@ -171,6 +183,7 @@ Müşteri
   - İsim arama: `filter[query]=...` (partial match), `filter[name]=...` exact match yapar — **kullanma**
   - Posta kodu alanı: API'de `postal_code` (`zip_code` değil) — okuma ve yazma için `postal_code` kullan
   - Paraşüt contact eşleştirme: `filter[tax_number]={vkn}` ile yapılır
+  - İrsaliye URL formatı: `https://uygulama.parasut.com/{company}/giden-irsaliyeler/{id}` (`irsaliyeler` **değil**, `giden-irsaliyeler`)
 
 ---
 
@@ -203,6 +216,8 @@ Müşteri
 | `pending_parasut_approval` | Admin Paraşüt onayı bekliyor |
 | `preparing` | Gül kargo hazırlıyor |
 | `shipped` | Sevk edildi — son aşama |
+| `revizyon_bekleniyor` | Admin revizyon talep etti; Sales güncelleyip yeniden gönderir |
+| `iptal_edildi` | Admin iptal etti — terminal aşama |
 
 ### Geçişler ve Yetkiler
 | Geçiş | Kim Yapar |
@@ -211,19 +226,28 @@ Müşteri
 | `parasut_review` → `pending_parasut_approval` | Warehouse (Gül) |
 | `pending_parasut_approval` → `preparing` | Admin (onay) |
 | `preparing` → `shipped` | Warehouse (Gül) |
-| Herhangi → `draft` (red) | Yalnızca Admin |
+| `pending_admin` → `revizyon_bekleniyor` | Admin (revizyon talep et) |
+| `revizyon_bekleniyor` → `pending_admin` | Sales (düzenleyip yeniden gönder) |
+| Herhangi (aktif) → `iptal_edildi` | Yalnızca Admin |
 
 ### Rol Kapsamları
-- **admin** — Tüm talepleri görür; tüm onay/red yetkisi
-- **sales (Ahmet)** — Talep oluşturur; yalnızca kendi taleplerini görür; fatura silebilir
+- **admin** — Tüm talepleri görür; tüm onay/revizyon/iptal yetkisi
+- **sales (Ahmet)** — Talep oluşturur; yalnızca kendi taleplerini görür; `revizyon_bekleniyor` taleplerini düzenleyip yeniden gönderir
 - **warehouse (Gül)** — Tüm talepleri görür; `parasut_review` ve `preparing` aşamalarını ilerletir; kargo PDF/fotoğraf yükler
 
 ### Bildirimler
-- Yeni talep → Admin'e
+- Yeni talep → Admin'e (in-app + e-posta)
 - `pending_admin` onayı → Warehouse'a
 - `parasut_review` geçişi → Admin'e
 - `pending_parasut_approval` onayı → Warehouse'a
 - `shipped` → Sales'e; TeamGram siparişi "Sevk edildi" olarak güncellenir
+- Revizyon talep edildi → Sales'e (in-app + kırmızı başlıklı e-posta, revizyon notu içerir)
+- İptal edildi → Sales'e (in-app + gri başlıklı e-posta)
+- Sales revize edip yeniden gönderdi → Admin'lere
+
+### Revizyon notu
+`ShipmentHistory` tablosunda `[REVIZYON]` prefix'li kayıt olarak saklanır.
+`get_shipment` response'unda `revision_note` alanı olarak en son `[REVIZYON]` kaydından parse edilir.
 
 ---
 

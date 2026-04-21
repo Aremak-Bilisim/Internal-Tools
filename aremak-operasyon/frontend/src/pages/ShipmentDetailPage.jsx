@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, Upload, Image, Drawer, Form, Select, Row, Col, DatePicker } from 'antd'
+import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, InputNumber, Upload, Image, Drawer, Form, Select, Row, Col, DatePicker } from 'antd'
 import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined, FilePdfOutlined, ShoppingOutlined, UploadOutlined, PaperClipOutlined, EditOutlined, SendOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -7,6 +7,8 @@ import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 
 const CARGO_COMPANIES = ['Yurtiçi Kargo', 'Aras Kargo', 'MNG Kargo', 'PTT Kargo', 'Sürat Kargo', 'DHL', 'UPS']
+
+const proxyUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -144,9 +146,18 @@ export default function ShipmentDetailPage() {
         try { odemeBelgesi = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
         setEditOdemeDoc(odemeBelgesi)
 
+        // 193526: Ödeme Tutarı (number)
+        const odemeTutariVal = cfById[193526]?.Value ? Number(cfById[193526].Value) : undefined
+
+        // 193527: Ödeme Para Birimi (select: 14860=TRL, 14861=USD, 14862=EUR)
+        let odemePbId = undefined
+        try { odemePbId = String(JSON.parse(cfById[193527]?.Value ?? 'null')?.Id ?? '') || undefined } catch {}
+
         editForm.setFieldsValue({
           odeme_durumu: odemeLabel,
           beklenen_odeme_tarihi: beklenenVal,
+          odeme_tutari: odemeTutariVal,
+          odeme_para_birimi: odemePbId,
         })
       } catch { /* sipariş bilgisi alınamazsa sessizce geç */ }
       finally { setEditOrderLoading(false) }
@@ -194,6 +205,8 @@ export default function ShipmentDetailPage() {
         const cfUpdates = {}
         if (values.odeme_durumu) cfUpdates['193501'] = values.odeme_durumu === 'Ödendi' ? '14858' : '14859'
         if (values.beklenen_odeme_tarihi) cfUpdates['193502'] = values.beklenen_odeme_tarihi.format('YYYY-MM-DD')
+        if (values.odeme_tutari != null && values.odeme_tutari !== '') cfUpdates['193526'] = String(values.odeme_tutari)
+        if (values.odeme_para_birimi) cfUpdates['193527'] = values.odeme_para_birimi
         if (Object.keys(cfUpdates).length) {
           try { await api.put(`/orders/${shipment.tg_order_id}/custom-fields`, { fields: cfUpdates }) } catch {}
         }
@@ -621,6 +634,8 @@ export default function ShipmentDetailPage() {
             const beklenenTarih = beklenenRaw ? beklenenRaw.slice(0, 10) : null
             let odemeBelgeleri = null
             try { odemeBelgeleri = JSON.parse(cfById['193472']?.Value || 'null') } catch {}
+            const odemeTutari = cfById['193526']?.Value ? Number(cfById['193526'].Value) : null
+            const odemePbRaw = (() => { try { return JSON.parse(cfById['193527']?.Value ?? 'null')?.Value } catch { return null } })()
 
             if (!odemeDurumu) return null
             return (
@@ -632,15 +647,20 @@ export default function ShipmentDetailPage() {
                   {beklenenTarih && (
                     <Descriptions.Item label="Beklenen Ödeme Tarihi">{beklenenTarih}</Descriptions.Item>
                   )}
+                  {odemeTutari != null && (
+                    <Descriptions.Item label="Ödeme Tutarı">
+                      {odemeTutari.toLocaleString('tr-TR')} {odemePbRaw || ''}
+                    </Descriptions.Item>
+                  )}
                 </Descriptions>
                 {odemeBelgeleri?.length > 0 && (
                   <div style={{ marginTop: 10 }}>
                     <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Ödeme Belgesi</Text>
                     <Space wrap>
                       {odemeBelgeleri.map((b, i) => (
-                        <a key={i} href={b.Url} target="_blank" rel="noreferrer">
+                        <a key={i} href={proxyUrl(b.Url)} target="_blank" rel="noreferrer">
                           <img
-                            src={b.Url}
+                            src={proxyUrl(b.Url)}
                             alt={b.FileName}
                             style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', objectFit: 'cover' }}
                             onError={e => {
@@ -952,34 +972,56 @@ export default function ShipmentDetailPage() {
               </Form.Item>
 
               {editOdemeDurumu === 'Ödendi' && (
-                <Form.Item label="Ödeme Belgesi" required>
-                  {editOdemeDoc?.length ? (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {editOdemeDoc.map((b, i) => (
-                        <a key={i} href={b.Url} target="_blank" rel="noreferrer">
-                          <img
-                            src={b.Url}
-                            alt={b.FileName}
-                            style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
-                            onError={e => { e.target.style.display = 'none' }}
-                          />
-                          <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <Upload
-                      beforeUpload={(file) => { setEditPaymentFile({ file }); return false }}
-                      onRemove={() => setEditPaymentFile(null)}
-                      maxCount={1}
-                      accept="image/*,.pdf"
-                      fileList={editPaymentFile?.file ? [{ uid: '1', name: editPaymentFile.file.name, status: 'done' }] : []}
-                    >
-                      <Button icon={<UploadOutlined />} size="small">Belge Yükle</Button>
-                      <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>TeamGram'da belge yok</Text>
-                    </Upload>
-                  )}
-                </Form.Item>
+                <>
+                  <Form.Item label="Ödeme Belgesi" required>
+                    {editOdemeDoc?.length ? (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {editOdemeDoc.map((b, i) => (
+                          <a key={i} href={proxyUrl(b.Url)} target="_blank" rel="noreferrer">
+                            <img
+                              src={proxyUrl(b.Url)}
+                              alt={b.FileName}
+                              style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
+                              onError={e => { e.target.style.display = 'none' }}
+                            />
+                            <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <Upload
+                        beforeUpload={(file) => { setEditPaymentFile({ file }); return false }}
+                        onRemove={() => setEditPaymentFile(null)}
+                        maxCount={1}
+                        accept="image/*,.pdf"
+                        fileList={editPaymentFile?.file ? [{ uid: '1', name: editPaymentFile.file.name, status: 'done' }] : []}
+                      >
+                        <Button icon={<UploadOutlined />} size="small">Belge Yükle</Button>
+                        <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>TeamGram'da belge yok</Text>
+                      </Upload>
+                    )}
+                  </Form.Item>
+
+                  <Row gutter={12}>
+                    <Col span={14}>
+                      <Form.Item name="odeme_tutari" label="Ödeme Tutarı">
+                        <InputNumber style={{ width: '100%' }} placeholder="0.00" min={0} precision={2} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={10}>
+                      <Form.Item name="odeme_para_birimi" label="Para Birimi">
+                        <Select
+                          placeholder="Seçin..."
+                          options={[
+                            { value: '14860', label: 'TRL' },
+                            { value: '14861', label: 'USD' },
+                            { value: '14862', label: 'EUR' },
+                          ]}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </>
               )}
 
               {editOdemeDurumu === 'Ödenecek' && (

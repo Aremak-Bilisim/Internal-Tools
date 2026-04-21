@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from typing import Optional
 from pydantic import BaseModel
+import httpx
 from app.core.auth import get_current_user
+from app.core.config import settings
 from app.services import teamgram
 
 router = APIRouter()
@@ -60,6 +63,26 @@ async def update_custom_fields(
 async def get_order_weblink(order_id: int, current_user=Depends(get_current_user)):
     url = await teamgram.get_order_weblink(order_id)
     return {"url": url}
+
+
+@router.get("/proxy/attachment")
+async def proxy_attachment(url: str, current_user=Depends(get_current_user)):
+    """TeamGram dosya URL'lerini token ile proxy üzerinden sun"""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            resp = await client.get(url, headers={"Token": settings.TEAMGRAM_TOKEN})
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail="Dosya alınamadı")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Dosya alınamadı")
+
+    content_type = resp.headers.get("content-type", "application/octet-stream")
+    return StreamingResponse(
+        iter([resp.content]),
+        media_type=content_type,
+        headers={"Content-Disposition": "inline"},
+    )
 
 
 @router.post("/{order_id}/clear-invoice-flag")

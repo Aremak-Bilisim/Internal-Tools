@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Table, Card, Tag, Typography, Button, Segmented, Tooltip, message,
-  Drawer, Form, Input, Select, DatePicker, Row, Col, Spin, Upload,
+  Drawer, Form, Input, InputNumber, Select, DatePicker, Row, Col, Spin, Upload,
 } from 'antd'
 import { FilePdfOutlined, ReloadOutlined, SendOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -11,6 +11,8 @@ import { useAuthStore } from '../store/auth'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
+
+const proxyUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
 
 const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }
 const STATUS_LABELS = { 0: 'Açık', 1: 'Tamamlandı', 2: 'İptal' }
@@ -351,6 +353,13 @@ export default function OrdersPage() {
       let odemeBelgesi = null
       try { odemeBelgesi = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
 
+      // 193526: Ödeme Tutarı (number)
+      const odemeTutariVal = cfById[193526]?.Value ? Number(cfById[193526].Value) : undefined
+
+      // 193527: Ödeme Para Birimi (select: 14860=TRL, 14861=USD, 14862=EUR)
+      let odemePbId = undefined
+      try { odemePbId = String(JSON.parse(cfById[193527]?.Value ?? 'null')?.Id ?? '') || undefined } catch {}
+
       form.setFieldsValue({
         addr_line: addr.addr_line,
         addr_district: addr.addr_district,
@@ -359,6 +368,8 @@ export default function OrdersPage() {
         odeme_durumu: odemeLabel,
         beklenen_odeme_tarihi: beklenenVal,
         _odeme_belgesi: odemeBelgesi,
+        odeme_tutari: odemeTutariVal,
+        odeme_para_birimi: odemePbId,
       })
     } catch {}
     finally { setDrawerLoading(false) }
@@ -436,6 +447,12 @@ export default function OrdersPage() {
       }
       if (values.beklenen_odeme_tarihi) {
         cfUpdates['193502'] = values.beklenen_odeme_tarihi.format('YYYY-MM-DD')
+      }
+      if (values.odeme_tutari != null && values.odeme_tutari !== '') {
+        cfUpdates['193526'] = String(values.odeme_tutari)
+      }
+      if (values.odeme_para_birimi) {
+        cfUpdates['193527'] = values.odeme_para_birimi
       }
       if (Object.keys(cfUpdates).length) {
         try {
@@ -852,46 +869,68 @@ export default function OrdersPage() {
             </Form.Item>
 
             {odemeDurumu === 'Ödendi' && (
-              <Form.Item label="Ödeme Belgesi" required>
-                <Form.Item noStyle shouldUpdate>
-                  {() => {
-                    const belgeler = form.getFieldValue('_odeme_belgesi')
-                    if (belgeler?.length) {
+              <>
+                <Form.Item label="Ödeme Belgesi" required>
+                  <Form.Item noStyle shouldUpdate>
+                    {() => {
+                      const belgeler = form.getFieldValue('_odeme_belgesi')
+                      if (belgeler?.length) {
+                        return (
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {belgeler.map((b, i) => (
+                              <a key={i} href={proxyUrl(b.Url)} target="_blank" rel="noreferrer">
+                                <img
+                                  src={proxyUrl(b.Url)}
+                                  alt={b.FileName}
+                                  style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
+                                  onError={e => { e.target.style.display = 'none' }}
+                                />
+                                <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>
+                              </a>
+                            ))}
+                          </div>
+                        )
+                      }
                       return (
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          {belgeler.map((b, i) => (
-                            <a key={i} href={b.Url} target="_blank" rel="noreferrer">
-                              <img
-                                src={b.Url}
-                                alt={b.FileName}
-                                style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
-                                onError={e => { e.target.style.display = 'none' }}
-                              />
-                              <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>
-                            </a>
-                          ))}
-                        </div>
+                        <Upload
+                          beforeUpload={(file) => { setPaymentFile({ file }); return false }}
+                          onRemove={() => setPaymentFile(null)}
+                          maxCount={1}
+                          accept="image/*,.pdf"
+                          fileList={paymentFile?.file ? [{ uid: '1', name: paymentFile.file.name, status: paymentFile.uploading ? 'uploading' : 'done' }] : []}
+                        >
+                          <Button icon={<UploadOutlined />} size="small">
+                            Belge Yükle
+                          </Button>
+                          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                            TeamGram'da belge yok
+                          </Text>
+                        </Upload>
                       )
-                    }
-                    return (
-                      <Upload
-                        beforeUpload={(file) => { setPaymentFile({ file }); return false }}
-                        onRemove={() => setPaymentFile(null)}
-                        maxCount={1}
-                        accept="image/*,.pdf"
-                        fileList={paymentFile?.file ? [{ uid: '1', name: paymentFile.file.name, status: paymentFile.uploading ? 'uploading' : 'done' }] : []}
-                      >
-                        <Button icon={<UploadOutlined />} size="small">
-                          Belge Yükle
-                        </Button>
-                        <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                          TeamGram'da belge yok
-                        </Text>
-                      </Upload>
-                    )
-                  }}
+                    }}
+                  </Form.Item>
                 </Form.Item>
-              </Form.Item>
+
+                <Row gutter={12}>
+                  <Col span={14}>
+                    <Form.Item name="odeme_tutari" label="Ödeme Tutarı">
+                      <InputNumber style={{ width: '100%' }} placeholder="0.00" min={0} precision={2} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={10}>
+                    <Form.Item name="odeme_para_birimi" label="Para Birimi">
+                      <Select
+                        placeholder="Seçin..."
+                        options={[
+                          { value: '14860', label: 'TRL' },
+                          { value: '14861', label: 'USD' },
+                          { value: '14862', label: 'EUR' },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </>
             )}
 
             {odemeDurumu === 'Ödenecek' && (
