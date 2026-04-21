@@ -198,3 +198,27 @@ def send_shipped(shipment: dict, admins: List[Tuple[str, str]], sales_users: Lis
         f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
     subject = f"[Sevk Edildi] {shipment.get('tg_order_name') or shipment.get('customer_name')}"
     _send(subject, html, admins + sales_users)
+
+
+def send_revision_requested(shipment: dict, creator_list: List[Tuple[str, str]], revision_note: str = "", actor_name: str = "Yönetici"):
+    """pending_admin → revizyon_bekleniyor: Satış personeline revizyon talebi bildir."""
+    rows = _shipment_summary_rows(shipment)
+    html = _base_email("#d4380d", "Sevk Talebi — Revizyon Gerekiyor",
+        f"<p>Merhaba {{{{name}}}},</p>"
+        f"<p><b>{actor_name}</b>, <b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> "
+        f"siparişinin sevk talebinde revizyon istedi. Lütfen aşağıdaki notu inceleyin ve talebi güncelleyerek yeniden gönderin.</p>"
+        f"{_note_block(revision_note)}"
+        f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
+    _send(f"[Revizyon] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, creator_list)
+
+
+def send_cancelled(shipment: dict, creator_list: List[Tuple[str, str]], note: str = "", actor_name: str = "Yönetici"):
+    """any → iptal_edildi: Satış personeline iptal bildir."""
+    rows = _shipment_summary_rows(shipment)
+    html = _base_email("#595959", "Sevk Talebi İptal Edildi",
+        f"<p>Merhaba {{{{name}}}},</p>"
+        f"<p><b>{shipment.get('tg_order_name') or shipment.get('customer_name')}</b> siparişinin "
+        f"sevk talebi <b>{actor_name}</b> tarafından iptal edildi.</p>"
+        f"{_note_block(note)}"
+        f"<table style='width:100%;border-collapse:collapse;margin:16px 0'>{rows}</table>")
+    _send(f"[İptal] Sevk Talebi: {shipment.get('tg_order_name') or shipment.get('customer_name')}", html, creator_list)

@@ -27,6 +27,7 @@ STAGE_TRANSITIONS = {
     "parasut_review":             {"next": "pending_parasut_approval",  "roles": ["warehouse"]},
     "pending_parasut_approval":   {"next": "preparing",                 "roles": ["admin"]},
     "preparing":                  {"next": "shipped",                   "roles": ["warehouse"]},
+    "revizyon_bekleniyor":        {"next": "pending_admin",             "roles": ["sales", "admin"]},
 }
 
 STAGE_LABELS = {
@@ -35,6 +36,8 @@ STAGE_LABELS = {
     "pending_parasut_approval":   "Paraşüt Onayı Bekleniyor",
     "preparing":                  "Sevk İçin Hazırlanıyor",
     "shipped":                    "Sevk Edildi",
+    "revizyon_bekleniyor":        "Revizyon Bekleniyor",
+    "iptal_edildi":               "İptal Edildi",
 }
 
 
@@ -270,7 +273,7 @@ def get_shipment(shipment_id: int, db: Session = Depends(get_db), current_user=D
     if not s:
         raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
     result = _shipment_to_dict(s)
-    result["history"] = [
+    history_list = [
         {
             "stage_from": h.stage_from,
             "stage_to": h.stage_to,
@@ -280,6 +283,15 @@ def get_shipment(shipment_id: int, db: Session = Depends(get_db), current_user=D
         }
         for h in s.history
     ]
+    result["history"] = history_list
+    # Son revizyon notunu ayrıca ekle (frontend'de banner için)
+    revision_entry = next(
+        (h for h in reversed(s.history) if h.stage_to == "revizyon_bekleniyor"),
+        None,
+    )
+    result["revision_note"] = (
+        revision_entry.note.replace("[REVIZYON]", "").strip() if revision_entry else None
+    )
     return result
 
 
@@ -347,7 +359,10 @@ def advance_stage(
             email_svc.send_pending_admin(shipment_dict, admin_list, note)
         except Exception as e:
             logger.error(f"Email failed ({new_stage}): {e}")
-        _create_notifs(admins, f"Yeni Sevk Talebi: {order_name}", note or "Onayınızı bekliyor.")
+        if old_stage == "revizyon_bekleniyor":
+            _create_notifs(admins, f"Revize Edildi — Onay Bekliyor: {order_name}", f"{current_user.name} revizyonu tamamladı. {note}".strip())
+        else:
+            _create_notifs(admins, f"Yeni Sevk Talebi: {order_name}", note or "Onayınızı bekliyor.")
     elif new_stage == "parasut_review":
         try:
             email_svc.send_approved_to_warehouse(shipment_dict, warehouse_list, note, actor_name=current_user.name)
@@ -478,18 +493,93 @@ def reject_shipment(
     s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    if s.stage in ("shipped", "iptal_edildi"):
+        raise HTTPException(status_code=400, detail="Bu talep artık iptal edilemez")
 
     old_stage = s.stage
-    s.stage = "draft"
+    s.stage = "iptal_edildi"
 
     history = ShipmentHistory(
         shipment_id=s.id,
         stage_from=old_stage,
-        stage_to="draft",
-        note=f"[RED] {data.note or 'Reddedildi'}",
+        stage_to="iptal_edildi",
+        note=f"[IPTAL] {data.note or 'İptal edildi'}",
         user_id=current_user.id,
     )
     db.add(history)
     db.commit()
     db.refresh(s)
+
+    # Notify creator
+    shipment_dict = _shipment_to_dict(s)
+    order_name = s.tg_order_name or s.customer_name
+    note = data.note or ""
+    if s.created_by:
+        creator_list = [(email_svc._notif_email(s.created_by), s.created_by.name)]
+        try:
+            email_svc.send_cancelled(shipment_dict, creator_list, note, actor_name=current_user.name)
+        except Exception as e:
+            logger.error(f"Email failed (iptal_edildi): {e}")
+        try:
+            db.add(Notification(
+                user_id=s.created_by.id,
+                title=f"Sevk Talebi İptal Edildi: {order_name}",
+                message=f"{current_user.name} talebi iptal etti. {note}".strip(),
+                shipment_id=s.id,
+            ))
+            db.commit()
+        except Exception as e:
+            logger.error(f"In-app notification failed (iptal_edildi): {e}")
+
+    return _shipment_to_dict(s)
+
+
+@router.post("/{shipment_id}/request-revision")
+def request_revision(
+    shipment_id: int,
+    data: StageAdvance,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin")),
+):
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    if s.stage != "pending_admin":
+        raise HTTPException(status_code=400, detail="Revizyon talebi yalnızca 'Yönetici Onayı Bekleniyor' aşamasında yapılabilir")
+
+    old_stage = s.stage
+    s.stage = "revizyon_bekleniyor"
+
+    history = ShipmentHistory(
+        shipment_id=s.id,
+        stage_from=old_stage,
+        stage_to="revizyon_bekleniyor",
+        note=f"[REVIZYON] {data.note or ''}".strip(),
+        user_id=current_user.id,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(s)
+
+    # Notify creator
+    shipment_dict = _shipment_to_dict(s)
+    order_name = s.tg_order_name or s.customer_name
+    revision_note = data.note or ""
+    if s.created_by:
+        creator_list = [(email_svc._notif_email(s.created_by), s.created_by.name)]
+        try:
+            email_svc.send_revision_requested(shipment_dict, creator_list, revision_note, actor_name=current_user.name)
+        except Exception as e:
+            logger.error(f"Email failed (revizyon_bekleniyor): {e}")
+        try:
+            db.add(Notification(
+                user_id=s.created_by.id,
+                title=f"Revizyon Gerekiyor: {order_name}",
+                message=f"{current_user.name} revizyon istedi. {revision_note}".strip(),
+                shipment_id=s.id,
+            ))
+            db.commit()
+        except Exception as e:
+            logger.error(f"In-app notification failed (revizyon_bekleniyor): {e}")
+
     return _shipment_to_dict(s)

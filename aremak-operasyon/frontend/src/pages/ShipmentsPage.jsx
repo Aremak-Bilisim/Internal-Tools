@@ -12,6 +12,8 @@ const STAGE_COLORS = {
   pending_parasut_approval: 'purple',
   preparing: 'cyan',
   shipped: 'green',
+  revizyon_bekleniyor: 'volcano',
+  iptal_edildi: 'default',
 }
 
 const STAGE_LABELS = {
@@ -20,15 +22,19 @@ const STAGE_LABELS = {
   pending_parasut_approval: 'Paraşüt Onayı Bekleniyor',
   preparing: 'Sevk İçin Hazırlanıyor',
   shipped: 'Sevk Edildi',
+  revizyon_bekleniyor: 'Revizyon Bekleniyor',
+  iptal_edildi: 'İptal Edildi',
 }
 
 const STAGES = [
   { key: 'all', label: 'Tümü' },
+  { key: 'revizyon_bekleniyor', label: 'Revizyon Bekleniyor' },
   { key: 'pending_admin', label: 'Yönetici Onayı Bekleniyor' },
   { key: 'parasut_review', label: 'Paraşüt Kontrolü' },
   { key: 'pending_parasut_approval', label: 'Paraşüt Onayı Bekleniyor' },
   { key: 'preparing', label: 'Sevke Hazırlanıyor' },
   { key: 'shipped', label: 'Sevk Edildi' },
+  { key: 'iptal_edildi', label: 'İptal Edildi' },
 ]
 
 export default function ShipmentsPage() {

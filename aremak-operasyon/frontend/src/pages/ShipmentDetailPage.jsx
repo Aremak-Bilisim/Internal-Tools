@@ -11,6 +11,7 @@ const { TextArea } = Input
 const STAGE_COLORS = {
   pending_admin: 'orange', parasut_review: 'blue',
   pending_parasut_approval: 'purple', preparing: 'cyan', shipped: 'green',
+  revizyon_bekleniyor: 'volcano', iptal_edildi: 'default',
 }
 
 const STAGE_LABELS = {
@@ -19,6 +20,8 @@ const STAGE_LABELS = {
   pending_parasut_approval: 'Paraşüt Onayı Bekleniyor',
   preparing: 'Sevk İçin Hazırlanıyor',
   shipped: 'Sevk Edildi',
+  revizyon_bekleniyor: 'Revizyon Bekleniyor',
+  iptal_edildi: 'İptal Edildi',
 }
 
 const ADVANCE_LABELS = {
@@ -26,6 +29,7 @@ const ADVANCE_LABELS = {
   parasut_review: 'Paraşüt Onayı Talep Et',
   pending_parasut_approval: 'Paraşüt Belgelerini Onayla',
   preparing: 'Sevk Edildi Olarak İşaretle',
+  revizyon_bekleniyor: 'Yeniden Gönder',
 }
 
 export default function ShipmentDetailPage() {
@@ -88,9 +92,13 @@ export default function ShipmentDetailPage() {
       if (noteModal === 'advance') {
         await api.post(`/shipments/${id}/advance`, { note: noteText || undefined })
         message.success('Aşama güncellendi')
+      } else if (noteModal === 'revision') {
+        if (!noteText.trim()) { message.warning('Revizyon notu zorunludur'); setNoteModal('revision'); return }
+        await api.post(`/shipments/${id}/request-revision`, { note: noteText })
+        message.warning('Revizyon talep edildi')
       } else {
-        await api.post(`/shipments/${id}/reject`, { note: noteText || 'Reddedildi' })
-        message.warning('Talep reddedildi')
+        await api.post(`/shipments/${id}/reject`, { note: noteText || 'İptal edildi' })
+        message.warning('Talep iptal edildi')
       }
       load()
     } catch (e) {
@@ -187,12 +195,14 @@ export default function ShipmentDetailPage() {
     parasut_review:           ['warehouse'],
     pending_parasut_approval: ['admin'],
     preparing:                ['warehouse'],
+    revizyon_bekleniyor:      ['sales', 'admin'],
   }
   const isPreparingStage = shipment.stage === 'preparing' && user?.role === 'warehouse'
   const canShip = isPreparingStage && !!shipment.cargo_pdf_url
   const canAdvance = ADVANCE_LABELS[shipment.stage] && STAGE_ALLOWED_ROLES[shipment.stage]?.includes(user?.role)
     && (shipment.stage !== 'preparing' || canShip)
-  const canReject = user?.role === 'admin' && ['pending_admin', 'pending_parasut_approval'].includes(shipment.stage)
+  const canRequestRevision = user?.role === 'admin' && shipment.stage === 'pending_admin'
+  const canReject = user?.role === 'admin' && !['shipped', 'iptal_edildi', 'draft'].includes(shipment.stage)
   const isKargo = shipment.delivery_type === 'Kargo'
 
   const itemColumns = [
@@ -316,36 +326,62 @@ export default function ShipmentDetailPage() {
               </div>
             )}
 
-            {(canAdvance || canReject || isPreparingStage) && (
-              <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+            {/* Revizyon notu banner — revizyon_bekleniyor aşamasında göster */}
+            {shipment.stage === 'revizyon_bekleniyor' && shipment.revision_note && (
+              <div style={{ marginTop: 16, padding: '10px 16px', background: '#fff2e8', border: '1px solid #ffbb96', borderRadius: 6 }}>
+                <Text strong style={{ color: '#d4380d', fontSize: 12 }}>Revizyon Notu</Text>
+                <div style={{ marginTop: 4, color: '#333' }}>{shipment.revision_note}</div>
+              </div>
+            )}
+
+            {/* İptal banner */}
+            {shipment.stage === 'iptal_edildi' && (
+              <div style={{ marginTop: 16, padding: '10px 16px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 6 }}>
+                <Text strong style={{ color: '#595959' }}>Bu sevk talebi iptal edilmiştir.</Text>
+              </div>
+            )}
+
+            {(canAdvance || canRequestRevision || canReject || isPreparingStage) && (
+              <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {canAdvance && (
                   <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
                     {ADVANCE_LABELS[shipment.stage]}
                   </Button>
                 )}
+                {canRequestRevision && (
+                  <Button icon={<RollbackOutlined />} onClick={() => openNoteModal('revision')} loading={advancing}
+                    style={{ borderColor: '#fa8c16', color: '#fa8c16' }}>
+                    Revizyon Talep Et
+                  </Button>
+                )}
                 {canReject && (
                   <Button danger icon={<RollbackOutlined />} onClick={() => openNoteModal('reject')} loading={advancing}>
-                    Reddet
+                    İptal Et
                   </Button>
                 )}
               </div>
             )}
 
             <Modal
-              title={noteModal === 'reject' ? 'Reddet — Not Ekle' : `${ADVANCE_LABELS[shipment?.stage] || 'Onayla'} — Not Ekle`}
+              title={
+                noteModal === 'reject' ? 'İptal Et — Not Ekle'
+                : noteModal === 'revision' ? 'Revizyon Talep Et'
+                : `${ADVANCE_LABELS[shipment?.stage] || 'Onayla'} — Not Ekle`
+              }
               open={!!noteModal}
               onOk={submitWithNote}
               onCancel={() => setNoteModal(null)}
-              okText={noteModal === 'reject' ? 'Reddet' : 'Onayla'}
-              okButtonProps={{ danger: noteModal === 'reject' }}
+              okText={noteModal === 'reject' ? 'İptal Et' : noteModal === 'revision' ? 'Revizyon Talep Et' : 'Onayla'}
+              okButtonProps={{ danger: noteModal === 'reject', style: noteModal === 'revision' ? { background: '#fa8c16', borderColor: '#fa8c16' } : undefined }}
               cancelText="Vazgeç"
             >
               <TextArea
                 rows={3}
                 placeholder={(() => {
-                  if (noteModal === 'reject') return 'İsteğe bağlı not (sevk sorumlusuna görünür)'
-                  const adminStages = ['draft', 'parasut_review']   // advance → admin okur
-                  const warehouseStages = ['pending_admin', 'pending_parasut_approval'] // advance → sevk sorumlusu okur
+                  if (noteModal === 'reject') return 'İsteğe bağlı not (satış personeline görünür)'
+                  if (noteModal === 'revision') return 'Revizyon açıklaması (zorunlu) — satış personeline gönderilir'
+                  const adminStages = ['parasut_review']
+                  const warehouseStages = ['pending_admin', 'pending_parasut_approval']
                   if (adminStages.includes(shipment?.stage)) return 'İsteğe bağlı not (yöneticiye görünür)'
                   if (warehouseStages.includes(shipment?.stage)) return 'İsteğe bağlı not (sevk sorumlusuna görünür)'
                   return 'İsteğe bağlı not'
@@ -543,13 +579,14 @@ export default function ShipmentDetailPage() {
             <Timeline
               items={(shipment.history || []).map((h) => {
                 const isCreated = h.note?.startsWith('[CREATED]')
-                const isRejected = h.note?.startsWith('[RED]')
-                const noteText = h.note?.replace('[CREATED]', '').replace('[RED]', '').trim()
+                const isRejected = h.note?.startsWith('[RED]') || h.note?.startsWith('[IPTAL]')
+                const isRevision = h.note?.startsWith('[REVIZYON]')
+                const noteText = h.note?.replace('[CREATED]', '').replace('[RED]', '').replace('[IPTAL]', '').replace('[REVIZYON]', '').trim()
                 const localTime = h.created_at
                   ? new Date(h.created_at + (h.created_at.endsWith('Z') ? '' : 'Z')).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })
                   : ''
                 return {
-                  color: isCreated ? 'green' : isRejected ? 'red' : 'blue',
+                  color: isCreated ? 'green' : isRejected ? 'red' : isRevision ? 'orange' : 'blue',
                   children: (
                     <div>
                       <Text strong style={{ fontSize: 12 }}>{h.user}</Text>
