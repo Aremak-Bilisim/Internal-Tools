@@ -17,8 +17,14 @@ const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComp
 const parseTgNumber = (val) => {
   if (val == null || val === '') return NaN
   const s = String(val).trim()
-  if (s.includes(',')) return parseFloat(s.replace(/\./g, '').replace(',', '.'))
-  return parseFloat(s)
+  const lastComma = s.lastIndexOf(',')
+  const lastPeriod = s.lastIndexOf('.')
+  if (lastComma === -1 && lastPeriod === -1) return parseFloat(s)
+  if (lastComma > lastPeriod) {
+    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+  } else {
+    return parseFloat(s.replace(/,/g, ''))
+  }
 }
 
 const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }

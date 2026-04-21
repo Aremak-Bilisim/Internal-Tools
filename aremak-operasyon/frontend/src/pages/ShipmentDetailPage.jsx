@@ -10,12 +10,21 @@ const CARGO_COMPANIES = ['Yurtiçi Kargo', 'Aras Kargo', 'MNG Kargo', 'PTT Kargo
 
 const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
 
-// TeamGram sayıları Türk formatında saklar: "26.007,23" → 26007.23
+// TeamGram sayı formatını otomatik tespit ederek parse eder.
+// Son ayırıcı virgülse → Türk formatı ("26.007,23"), noktaysa → US formatı ("26,007.23")
 const parseTgNumber = (val) => {
   if (val == null || val === '') return NaN
   const s = String(val).trim()
-  if (s.includes(',')) return parseFloat(s.replace(/\./g, '').replace(',', '.'))
-  return parseFloat(s)
+  const lastComma = s.lastIndexOf(',')
+  const lastPeriod = s.lastIndexOf('.')
+  if (lastComma === -1 && lastPeriod === -1) return parseFloat(s)
+  if (lastComma > lastPeriod) {
+    // Türk formatı: "26.007,23" → nokta=binlik, virgül=ondalık
+    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+  } else {
+    // US formatı: "26,007.23" → virgül=binlik, nokta=ondalık
+    return parseFloat(s.replace(/,/g, ''))
+  }
 }
 
 const { Title, Text } = Typography
