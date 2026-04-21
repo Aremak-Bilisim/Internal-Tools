@@ -55,8 +55,12 @@ export default function ShipmentDetailPage() {
   const [editDrawerOpen, setEditDrawerOpen] = useState(false)
   const [editForm] = Form.useForm()
   const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editOrderLoading, setEditOrderLoading] = useState(false)
+  const [editPaymentFile, setEditPaymentFile] = useState(null)
+  const [editOdemeDoc, setEditOdemeDoc] = useState(null) // mevcut TG ödeme belgesi
   const editDeliveryType = Form.useWatch('delivery_type', editForm)
   const editDocType = Form.useWatch('shipping_doc_type', editForm)
+  const editOdemeDurumu = Form.useWatch('odeme_durumu', editForm)
 
   const load = () => {
     setLoading(true)
@@ -93,8 +97,10 @@ export default function ShipmentDetailPage() {
     setNoteModal(type)
   }
 
-  const openEditDrawer = () => {
+  const openEditDrawer = async () => {
     if (!shipment) return
+    setEditPaymentFile(null)
+    setEditOdemeDoc(null)
     editForm.setFieldsValue({
       delivery_type: shipment.delivery_type,
       cargo_company: shipment.cargo_company,
@@ -109,8 +115,42 @@ export default function ShipmentDetailPage() {
       notes: shipment.notes,
       invoice_note: shipment.invoice_note,
       waybill_note: shipment.waybill_note,
+      odeme_durumu: undefined,
+      beklenen_odeme_tarihi: undefined,
     })
     setEditDrawerOpen(true)
+
+    // TG siparişinden ödeme bilgilerini çek
+    if (shipment.tg_order_id) {
+      setEditOrderLoading(true)
+      try {
+        const res = await api.get(`/orders/${shipment.tg_order_id}`)
+        const o = res.data
+        const cfById = Object.fromEntries((o.CustomFieldDatas || []).map(f => [f.CustomFieldId, f]))
+
+        // 193501: Ödeme Durumu
+        const odemeCf = cfById[193501]
+        let odemeVal = ''
+        try { odemeVal = String(JSON.parse(odemeCf?.Value ?? 'null')?.Id ?? '') } catch { odemeVal = String(odemeCf?.Value ?? '') }
+        const odemeLabel = odemeVal === '14858' ? 'Ödendi' : odemeVal === '14859' ? 'Ödenecek' : undefined
+
+        // 193502: Beklenen Ödeme Tarihi
+        const beklenenCf = cfById[193502]
+        const beklenenRaw = beklenenCf?.UnFormattedDate || beklenenCf?.Value
+        const beklenenVal = beklenenRaw ? dayjs(beklenenRaw) : undefined
+
+        // 193472: Ödeme Belgesi
+        let odemeBelgesi = null
+        try { odemeBelgesi = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
+        setEditOdemeDoc(odemeBelgesi)
+
+        editForm.setFieldsValue({
+          odeme_durumu: odemeLabel,
+          beklenen_odeme_tarihi: beklenenVal,
+        })
+      } catch { /* sipariş bilgisi alınamazsa sessizce geç */ }
+      finally { setEditOrderLoading(false) }
+    }
   }
 
   const submitEditAndResubmit = async () => {
@@ -137,7 +177,35 @@ export default function ShipmentDetailPage() {
         waybill_note: values.waybill_note || null,
         items: shipment.items || [],
       })
-      // 2) Yeniden gönder (revizyon_bekleniyor → pending_admin)
+      // 2) Ödeme durumu zorunlu kontrolü
+      if (!values.odeme_durumu) {
+        message.error('Ödeme durumu seçilmesi zorunludur')
+        setEditSubmitting(false)
+        return
+      }
+      if (values.odeme_durumu === 'Ödendi' && !editOdemeDoc?.length && !editPaymentFile?.file) {
+        message.error('Ödeme belgesi yüklenmesi zorunludur')
+        setEditSubmitting(false)
+        return
+      }
+
+      // 3) TG ödeme custom fields güncelle
+      if (shipment.tg_order_id) {
+        const cfUpdates = {}
+        if (values.odeme_durumu) cfUpdates['193501'] = values.odeme_durumu === 'Ödendi' ? '14858' : '14859'
+        if (values.beklenen_odeme_tarihi) cfUpdates['193502'] = values.beklenen_odeme_tarihi.format('YYYY-MM-DD')
+        if (Object.keys(cfUpdates).length) {
+          try { await api.put(`/orders/${shipment.tg_order_id}/custom-fields`, { fields: cfUpdates }) } catch {}
+        }
+        // Ödeme belgesi yükle
+        if (editPaymentFile?.file && values.odeme_durumu === 'Ödendi') {
+          const fd = new FormData()
+          fd.append('file', editPaymentFile.file)
+          try { await api.post(`/orders/${shipment.tg_order_id}/payment-doc`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }) } catch {}
+        }
+      }
+
+      // 4) Yeniden gönder (revizyon_bekleniyor → pending_admin)
       await api.post(`/shipments/${id}/advance`, { note: 'Revizyon tamamlandı, yeniden gönderildi.' })
       message.success('Talep güncellendi ve yeniden gönderildi')
       setEditDrawerOpen(false)
@@ -815,6 +883,69 @@ export default function ShipmentDetailPage() {
             <Form.Item name="waybill_note" label="İrsaliye Notu">
               <Input.TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
             </Form.Item>
+          )}
+
+          {/* Ödeme Bilgileri — sevk talebi oluşturma formuyla aynı sırada */}
+          {editOrderLoading ? (
+            <Spin size="small" style={{ display: 'block', textAlign: 'center', margin: '12px 0' }} />
+          ) : (
+            <>
+              <Form.Item
+                name="odeme_durumu"
+                label="Ödeme Durumu"
+                tooltip="Lütfen güncel ödeme durumunu girin"
+                rules={[{ required: true, message: 'Ödeme durumu gerekli' }]}
+              >
+                <Select
+                  placeholder="Güncel durumu seçin..."
+                  options={[
+                    { value: 'Ödendi', label: 'Ödendi' },
+                    { value: 'Ödenecek', label: 'Ödenecek' },
+                  ]}
+                />
+              </Form.Item>
+
+              {editOdemeDurumu === 'Ödendi' && (
+                <Form.Item label="Ödeme Belgesi" required>
+                  {editOdemeDoc?.length ? (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {editOdemeDoc.map((b, i) => (
+                        <a key={i} href={b.Url} target="_blank" rel="noreferrer">
+                          <img
+                            src={b.Url}
+                            alt={b.FileName}
+                            style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', cursor: 'pointer' }}
+                            onError={e => { e.target.style.display = 'none' }}
+                          />
+                          <div style={{ fontSize: 11, color: '#1677ff', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.FileName}</div>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <Upload
+                      beforeUpload={(file) => { setEditPaymentFile({ file }); return false }}
+                      onRemove={() => setEditPaymentFile(null)}
+                      maxCount={1}
+                      accept="image/*,.pdf"
+                      fileList={editPaymentFile?.file ? [{ uid: '1', name: editPaymentFile.file.name, status: 'done' }] : []}
+                    >
+                      <Button icon={<UploadOutlined />} size="small">Belge Yükle</Button>
+                      <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>TeamGram'da belge yok</Text>
+                    </Upload>
+                  )}
+                </Form.Item>
+              )}
+
+              {editOdemeDurumu === 'Ödenecek' && (
+                <Form.Item
+                  name="beklenen_odeme_tarihi"
+                  label="Beklenen Ödeme Tarihi"
+                  rules={[{ required: true, message: 'Tarih seçin' }]}
+                >
+                  <DatePicker style={{ width: '100%' }} format="DD.MM.YYYY" />
+                </Form.Item>
+              )}
+            </>
           )}
 
           <Form.Item name="notes" label="Ek Notlar">
