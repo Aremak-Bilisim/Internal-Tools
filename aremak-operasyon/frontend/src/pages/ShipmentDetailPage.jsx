@@ -612,6 +612,52 @@ export default function ShipmentDetailPage() {
             </Card>
           )}
 
+          {/* Ödeme Bilgileri */}
+          {order && (() => {
+            const cfById = Object.fromEntries((order.CustomFieldDatas || []).map(f => [String(f.CustomFieldId), f]))
+            const odemeValRaw = (() => { try { return String(JSON.parse(cfById['193501']?.Value ?? 'null')?.Id ?? '') } catch { return String(cfById['193501']?.Value ?? '') } })()
+            const odemeDurumu = odemeValRaw === '14858' ? 'Ödendi' : odemeValRaw === '14859' ? 'Ödenecek' : null
+            const beklenenRaw = cfById['193502']?.UnFormattedDate || cfById['193502']?.Value
+            const beklenenTarih = beklenenRaw ? beklenenRaw.slice(0, 10) : null
+            let odemeBelgeleri = null
+            try { odemeBelgeleri = JSON.parse(cfById['193472']?.Value || 'null') } catch {}
+
+            if (!odemeDurumu) return null
+            return (
+              <Card title="Ödeme" size="small">
+                <Descriptions column={2} size="small">
+                  <Descriptions.Item label="Ödeme Durumu">
+                    <Tag color={odemeDurumu === 'Ödendi' ? 'green' : 'orange'}>{odemeDurumu}</Tag>
+                  </Descriptions.Item>
+                  {beklenenTarih && (
+                    <Descriptions.Item label="Beklenen Ödeme Tarihi">{beklenenTarih}</Descriptions.Item>
+                  )}
+                </Descriptions>
+                {odemeBelgeleri?.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Ödeme Belgesi</Text>
+                    <Space wrap>
+                      {odemeBelgeleri.map((b, i) => (
+                        <a key={i} href={b.Url} target="_blank" rel="noreferrer">
+                          <img
+                            src={b.Url}
+                            alt={b.FileName}
+                            style={{ height: 64, borderRadius: 4, border: '1px solid #d9d9d9', objectFit: 'cover' }}
+                            onError={e => {
+                              e.target.style.display = 'none'
+                              e.target.nextSibling.style.display = 'block'
+                            }}
+                          />
+                          <div style={{ display: 'none', fontSize: 11, color: '#1677ff' }}>{b.FileName}</div>
+                        </a>
+                      ))}
+                    </Space>
+                  </div>
+                )}
+              </Card>
+            )
+          })()}
+
           {/* Fatura (Paraşüt) */}
           <Card title="Fatura (Paraşüt)" size="small">
             {shipment.invoice_url || shipment.invoice_no ? (
