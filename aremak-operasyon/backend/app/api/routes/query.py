@@ -575,7 +575,8 @@ async def get_customer_detail(tg_id: int, db: Session = Depends(get_db), current
         "email": email or "",
         "website": website or "",
         "basic_relation_types": relation_types,
-        "channel_id": company.get("CustomChannelId"),
+        # CustomChannelId null gelir — gerçek ID CustomChannel.Id'de
+        "channel_id": (company.get("CustomChannel") or {}).get("Id"),
         "industry_ids": industry_ids,
         "musteri_tipi": custom_fields.get(192253) or "",
         "indirim_seviyesi": custom_fields.get(192610) or "0",

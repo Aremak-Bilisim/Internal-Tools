@@ -136,7 +136,7 @@ Müşteri
 
 #### Companies/Get vs Companies/Edit — alan adı farkları
 - `Companies/Get` → `BasicRelationType` (tekil string); `Companies/Edit` GET payload → `BasicRelationTypes` (liste)
-- `Companies/Get` → `CustomChannelId`; `Companies/Edit` payload → `Channel` (integer)
+- `Companies/Get` → `CustomChannelId` null gelir, gerçek ID `CustomChannel.Id`'de; `Companies/Edit` payload → `Channel` (integer)
 - `Companies/Get` → `Industries` (obje listesi, `{Id, Name, ...}`); Edit'e **gönderilmez** — `Domain` required hatası verir
 - Sektör güncellemesi için `IndustryIds` (integer listesi) kullanılır
 - `Companies/Get`'te top-level `Address` null olabilir — gerçek adres `Contactinfos` listesinde (`_ADDRESS_TYPE_NAMES` ile eşleştir)
