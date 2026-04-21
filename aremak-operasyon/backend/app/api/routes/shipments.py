@@ -483,6 +483,43 @@ def upload_cargo_photos(
     return _shipment_to_dict(s)
 
 
+@router.put("/{shipment_id}")
+def update_shipment(
+    shipment_id: int,
+    data: ShipmentCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """Revizyon aşamasında talebi güncelle."""
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    if s.stage not in ("draft", "revizyon_bekleniyor"):
+        raise HTTPException(status_code=400, detail="Bu aşamada talep güncellenemez")
+    if current_user.role == "sales" and s.created_by_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Yalnızca kendi talebinizi güncelleyebilirsiniz")
+
+    s.delivery_type = data.delivery_type
+    s.cargo_company = data.cargo_company
+    s.delivery_address = data.delivery_address
+    s.delivery_district = data.delivery_district
+    s.delivery_city = data.delivery_city
+    s.delivery_zip = data.delivery_zip
+    s.recipient_name = data.recipient_name
+    s.recipient_phone = data.recipient_phone
+    s.planned_ship_date = data.planned_ship_date
+    s.shipping_doc_type = data.shipping_doc_type
+    s.notes = data.notes
+    s.invoice_note = data.invoice_note
+    s.waybill_note = data.waybill_note
+    if data.items is not None:
+        s.items = data.items
+
+    db.commit()
+    db.refresh(s)
+    return _shipment_to_dict(s)
+
+
 @router.post("/{shipment_id}/reject")
 def reject_shipment(
     shipment_id: int,

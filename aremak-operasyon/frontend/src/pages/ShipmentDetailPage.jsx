@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, Upload, Image } from 'antd'
-import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined, FilePdfOutlined, ShoppingOutlined, UploadOutlined, PaperClipOutlined } from '@ant-design/icons'
+import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, Upload, Image, Drawer, Form, Select, Row, Col, DatePicker } from 'antd'
+import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined, FilePdfOutlined, ShoppingOutlined, UploadOutlined, PaperClipOutlined, EditOutlined, SendOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
+import dayjs from 'dayjs'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+
+const CARGO_COMPANIES = ['Yurtiçi Kargo', 'Aras Kargo', 'MNG Kargo', 'PTT Kargo', 'Sürat Kargo', 'DHL', 'UPS']
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -49,6 +52,11 @@ export default function ShipmentDetailPage() {
   const [invoiceDetails, setInvoiceDetails] = useState(null)
   const [irsaliye, setIrsaliye] = useState(null)
   const [irsaliyePdfLoading, setIrsaliyePdfLoading] = useState(false)
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false)
+  const [editForm] = Form.useForm()
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const editDeliveryType = Form.useWatch('delivery_type', editForm)
+  const editDocType = Form.useWatch('shipping_doc_type', editForm)
 
   const load = () => {
     setLoading(true)
@@ -83,6 +91,63 @@ export default function ShipmentDetailPage() {
   const openNoteModal = (type) => {
     setNoteText('')
     setNoteModal(type)
+  }
+
+  const openEditDrawer = () => {
+    if (!shipment) return
+    editForm.setFieldsValue({
+      delivery_type: shipment.delivery_type,
+      cargo_company: shipment.cargo_company,
+      delivery_address: shipment.delivery_address,
+      delivery_district: shipment.delivery_district,
+      delivery_city: shipment.delivery_city,
+      delivery_zip: shipment.delivery_zip,
+      recipient_name: shipment.recipient_name,
+      recipient_phone: shipment.recipient_phone,
+      planned_ship_date: shipment.planned_ship_date ? dayjs(shipment.planned_ship_date) : null,
+      shipping_doc_type: shipment.shipping_doc_type,
+      notes: shipment.notes,
+      invoice_note: shipment.invoice_note,
+      waybill_note: shipment.waybill_note,
+    })
+    setEditDrawerOpen(true)
+  }
+
+  const submitEditAndResubmit = async () => {
+    try {
+      const values = await editForm.validateFields()
+      setEditSubmitting(true)
+      // 1) Talebi güncelle
+      await api.put(`/shipments/${id}`, {
+        customer_name: shipment.customer_name,
+        tg_order_id: shipment.tg_order_id,
+        tg_order_name: shipment.tg_order_name,
+        delivery_type: values.delivery_type || null,
+        cargo_company: values.cargo_company || null,
+        delivery_address: values.delivery_address || null,
+        delivery_district: values.delivery_district || null,
+        delivery_city: values.delivery_city || null,
+        delivery_zip: values.delivery_zip || null,
+        recipient_name: values.recipient_name || null,
+        recipient_phone: values.recipient_phone || null,
+        planned_ship_date: values.planned_ship_date ? values.planned_ship_date.format('YYYY-MM-DD') : null,
+        shipping_doc_type: values.shipping_doc_type || null,
+        notes: values.notes || null,
+        invoice_note: values.invoice_note || null,
+        waybill_note: values.waybill_note || null,
+        items: shipment.items || [],
+      })
+      // 2) Yeniden gönder (revizyon_bekleniyor → pending_admin)
+      await api.post(`/shipments/${id}/advance`, { note: 'Revizyon tamamlandı, yeniden gönderildi.' })
+      message.success('Talep güncellendi ve yeniden gönderildi')
+      setEditDrawerOpen(false)
+      load()
+    } catch (err) {
+      if (err?.errorFields) return
+      message.error(err?.response?.data?.detail || 'Güncelleme başarısız')
+    } finally {
+      setEditSubmitting(false)
+    }
   }
 
   const submitWithNote = async () => {
@@ -343,10 +408,17 @@ export default function ShipmentDetailPage() {
 
             {(canAdvance || canRequestRevision || canReject || isPreparingStage) && (
               <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {canAdvance && (
-                  <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
-                    {ADVANCE_LABELS[shipment.stage]}
+                {/* revizyon_bekleniyor aşamasında düzenleme formu aç */}
+                {shipment.stage === 'revizyon_bekleniyor' && STAGE_ALLOWED_ROLES['revizyon_bekleniyor']?.includes(user?.role) ? (
+                  <Button type="primary" icon={<EditOutlined />} onClick={openEditDrawer}>
+                    Sevk Talebini Güncelle
                   </Button>
+                ) : (
+                  canAdvance && (
+                    <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
+                      {ADVANCE_LABELS[shipment.stage]}
+                    </Button>
+                  )
                 )}
                 {canRequestRevision && (
                   <Button icon={<RollbackOutlined />} onClick={() => openNoteModal('revision')} loading={advancing}
@@ -605,6 +677,151 @@ export default function ShipmentDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* Sevk Talebi Düzenleme Drawer */}
+      <Drawer
+        title="Sevk Talebini Güncelle"
+        placement="right"
+        width={500}
+        open={editDrawerOpen}
+        onClose={() => setEditDrawerOpen(false)}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setEditDrawerOpen(false)}>İptal</Button>
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              loading={editSubmitting}
+              onClick={submitEditAndResubmit}
+            >
+              Kaydet ve Yeniden Gönder
+            </Button>
+          </div>
+        }
+      >
+        {/* Revizyon notu hatırlatıcı */}
+        {shipment?.revision_note && (
+          <div style={{ marginBottom: 20, padding: '10px 16px', background: '#fff2e8', border: '1px solid #ffbb96', borderRadius: 6 }}>
+            <Text strong style={{ color: '#d4380d', fontSize: 12 }}>Revizyon Notu</Text>
+            <div style={{ marginTop: 4, color: '#333', fontSize: 13 }}>{shipment.revision_note}</div>
+          </div>
+        )}
+
+        <Form form={editForm} layout="vertical">
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="delivery_type"
+                label="Teslim Şekli"
+                rules={[{ required: true, message: 'Teslim şekli seçin' }]}
+              >
+                <Select
+                  options={[
+                    { value: 'Kargo', label: 'Kargo' },
+                    { value: 'Ofis Teslim', label: 'Ofis Teslim' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="planned_ship_date"
+                label="Planlanan Sevk Tarihi"
+                rules={[{ required: true, message: 'Tarih seçin' }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD.MM.YYYY" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {editDeliveryType === 'Kargo' && (
+            <>
+              <Form.Item
+                name="cargo_company"
+                label="Kargo Firması"
+                rules={[{ required: true, message: 'Kargo firması seçin' }]}
+              >
+                <Select options={CARGO_COMPANIES.map(c => ({ value: c, label: c }))} />
+              </Form.Item>
+
+              <Form.Item
+                name="delivery_address"
+                label="Teslimat Adresi"
+                rules={[{ required: true, message: 'Adres gerekli' }]}
+              >
+                <Input.TextArea rows={2} placeholder="Cadde, sokak, no, daire..." />
+              </Form.Item>
+
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="delivery_district" label="İlçe" rules={[{ required: true, message: 'İlçe gerekli' }]}>
+                    <Input placeholder="Kadıköy" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="delivery_city" label="İl" rules={[{ required: true, message: 'İl gerekli' }]}>
+                    <Input placeholder="İstanbul" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item
+                name="delivery_zip"
+                label="Posta Kodu"
+                rules={[
+                  { required: true, message: 'Posta kodu gerekli' },
+                  { pattern: /^\d{5}$/, message: '5 haneli posta kodu girin' },
+                ]}
+              >
+                <Input placeholder="34710" maxLength={5} style={{ width: 120 }} />
+              </Form.Item>
+
+              <Row gutter={12}>
+                <Col span={14}>
+                  <Form.Item name="recipient_name" label="Alıcı Adı" rules={[{ required: true, message: 'Alıcı adı gerekli' }]}>
+                    <Input placeholder="Teslim alacak kişi" />
+                  </Form.Item>
+                </Col>
+                <Col span={10}>
+                  <Form.Item name="recipient_phone" label="Alıcı Telefonu" rules={[{ required: true, message: 'Telefon gerekli' }]}>
+                    <Input placeholder="05xx..." />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )}
+
+          <Form.Item
+            name="shipping_doc_type"
+            label="Gönderim Belgesi"
+            rules={[{ required: true, message: 'Gönderim belgesi seçin' }]}
+          >
+            <Select
+              options={[
+                { value: 'Fatura', label: 'Fatura' },
+                { value: 'İrsaliye', label: 'İrsaliye' },
+                { value: 'Fatura + İrsaliye', label: 'Fatura + İrsaliye' },
+              ]}
+            />
+          </Form.Item>
+
+          {(editDocType === 'Fatura' || editDocType === 'Fatura + İrsaliye') && (
+            <Form.Item name="invoice_note" label="Fatura Notu">
+              <Input.TextArea rows={2} placeholder="Vergi dairesi, açıklama notu vb." />
+            </Form.Item>
+          )}
+
+          {(editDocType === 'İrsaliye' || editDocType === 'Fatura + İrsaliye') && (
+            <Form.Item name="waybill_note" label="İrsaliye Notu">
+              <Input.TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
+            </Form.Item>
+          )}
+
+          <Form.Item name="notes" label="Ek Notlar">
+            <Input.TextArea rows={2} placeholder="İsteğe bağlı..." />
+          </Form.Item>
+        </Form>
+      </Drawer>
     </div>
   )
 }
