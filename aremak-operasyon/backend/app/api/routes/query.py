@@ -493,6 +493,231 @@ async def create_customer(body: dict, db: Session = Depends(get_db), current_use
 
 
 # ---------------------------------------------------------------------------
+# GET /customer/{tg_id}  — Düzenleme formu için firma detayı
+# ---------------------------------------------------------------------------
+
+@router.get("/customer/{tg_id}")
+async def get_customer_detail(tg_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Firma düzenleme formu için TeamGram'dan tam detay + Paraşüt ID döner."""
+    try:
+        company = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": tg_id})
+        if not company or not company.get("Id"):
+            raise HTTPException(404, "TeamGram'da firma bulunamadı")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"TeamGram hatası: {e}")
+
+    from app.services.tg_sync import _ADDRESS_TYPE_NAMES
+
+    # Contact info'lardan adres/telefon/email/website çek
+    contacts = company.get("Contactinfos") or []
+    addr_contact = next(
+        (c for c in contacts if (c.get("ContactinfoType", {}).get("Name") or "") in _ADDRESS_TYPE_NAMES),
+        None
+    )
+    phone   = next((c.get("Value") for c in contacts if c.get("ContactinfoType", {}).get("Name") == "Phone"), None)
+    email   = next((c.get("Value") for c in contacts if c.get("ContactinfoType", {}).get("Name") == "Email"), None)
+    website = next((c.get("Value") for c in contacts if c.get("ContactinfoType", {}).get("Name") == "Website"), None)
+
+    # Adres: önce top-level Address, yoksa Contactinfos'tan
+    address  = company.get("Address") or (addr_contact.get("Value") if addr_contact else "") or ""
+    city     = company.get("CityName") or (addr_contact.get("CityName") if addr_contact else "") or ""
+    district = company.get("StateName") or (addr_contact.get("StateName") if addr_contact else "") or ""
+
+    # İlişki tipi: TG bazen tekil (BasicRelationType) bazen çoğul (BasicRelationTypes) döner
+    relation_type = company.get("BasicRelationType")
+    relation_types = company.get("BasicRelationTypes") or (
+        [relation_type] if relation_type else []
+    )
+
+    # Sektörler: IndustryIds yoksa Industries listesinden Id'leri çek
+    industry_ids = company.get("IndustryIds") or [
+        i["Id"] for i in (company.get("Industries") or []) if i.get("Id")
+    ]
+
+    # Özel alanlar
+    custom_fields = {cf.get("CustomFieldId"): cf.get("Value") for cf in (company.get("CustomFieldDatas") or [])}
+
+    # Paraşüt ID + zip_code — VKN ile bul
+    tax_no = (company.get("TaxNo") or "").strip()
+    parasut_id = None
+    zip_code = ""
+    if tax_no:
+        try:
+            token = await _get_token()
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"{BASE}/v4/{COMPANY}/contacts",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"filter[tax_number]": tax_no, "page[size]": 1}
+                )
+                if r.status_code == 200:
+                    items = r.json().get("data", [])
+                    if items:
+                        parasut_id = items[0]["id"]
+                        a = items[0].get("attributes", {})
+                        # Paraşüt API'de alan adı postal_code (zip_code değil)
+                        zip_code = a.get("postal_code") or a.get("zip_code") or ""
+        except Exception as e:
+            logger.warning(f"Paraşüt ID lookup hatası: {e}")
+
+    return {
+        "tg_id": tg_id,
+        "name": company.get("Name") or "",
+        "tax_no": tax_no,
+        "tax_office": company.get("TaxOffice") or "",
+        "address": address,
+        "district": district,
+        "city": city,
+        "zip_code": zip_code,
+        "phone": phone or "",
+        "email": email or "",
+        "website": website or "",
+        "basic_relation_types": relation_types,
+        "channel_id": company.get("CustomChannelId"),
+        "industry_ids": industry_ids,
+        "musteri_tipi": custom_fields.get(192253) or "",
+        "indirim_seviyesi": custom_fields.get(192610) or "0",
+        "kullanici_tipi": custom_fields.get(192611) or "",
+        "default_due_days": company.get("DefaultDueDays") or 0,
+        "description": company.get("Description") or "",
+        "parasut_id": parasut_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /customer/update  — Formdaki alanlarla firma güncelle (TG + opsiyonel Paraşüt)
+# ---------------------------------------------------------------------------
+
+@router.post("/customer/update")
+async def update_customer(body: dict, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.services.tg_sync import _ADDRESS_TYPE_NAMES
+
+    tg_id = body.get("tg_id")
+    if not tg_id:
+        raise HTTPException(400, "tg_id zorunludur")
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Firma adı zorunludur")
+
+    try:
+        # Companies/Edit GET → edit-ready payload (mevcut alanlar + ID'ler korunur)
+        edit_data = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Edit", {"id": tg_id})
+        if not edit_data:
+            raise HTTPException(404, "TeamGram'da firma bulunamadı")
+
+        payload = dict(edit_data)
+        payload["Id"]        = tg_id
+        payload["Name"]      = name
+        payload["TaxNo"]     = body.get("tax_no") or ""
+        payload["TaxOffice"] = body.get("tax_office") or ""
+        payload["CityName"]  = body.get("city") or ""
+        payload["StateName"] = body.get("district") or ""
+        payload["Address"]   = body.get("address") or ""
+
+        if body.get("basic_relation_types"):
+            payload["BasicRelationTypes"] = body["basic_relation_types"]
+        # Edit payload'da channel "Channel" (int), Companies/Get'teki "CustomChannelId" değil
+        if body.get("channel_id") is not None:
+            payload["Channel"] = body["channel_id"]
+        # IndustryIds: tam ID listesi gönder (mevcut Industries objelerinden farklı)
+        if body.get("industry_ids") is not None:
+            payload["IndustryIds"] = body["industry_ids"] or []
+        if body.get("description") is not None:
+            payload["Description"] = body["description"] or None
+        if body.get("default_due_days") is not None:
+            payload["DefaultDueDays"] = body["default_due_days"]
+
+        # Özel alanları mevcut liste üzerinde güncelle
+        cfd = list(payload.get("CustomFieldDatas") or [])
+        cf_map = {cf["CustomFieldId"]: cf for cf in cfd}
+        for cf_id, key in [(192253, "musteri_tipi"), (192610, "indirim_seviyesi"), (192611, "kullanici_tipi")]:
+            if body.get(key) is not None:
+                val = str(body[key])
+                if cf_id in cf_map:
+                    cf_map[cf_id]["Value"] = val
+                else:
+                    cfd.append({"CustomFieldId": cf_id, "Value": val})
+        payload["CustomFieldDatas"] = cfd or None
+
+        # ContactInfoList: adres tiplerini çıkar (adres top-level Address alanına gider)
+        # Telefon/email/website mevcut kayıtlarda ID ile güncellenir, yoksa eklenir
+        contact_infos = [
+            ci for ci in (payload.get("ContactInfoList") or [])
+            if (ci.get("Type") or ci.get("ContactinfoType", {}).get("Name") or "") not in _ADDRESS_TYPE_NAMES
+        ]
+        for ci_type, key in [("Phone", "phone"), ("Email", "email"), ("Website", "website")]:
+            val = (body.get(key) or "").strip()
+            idx = next(
+                (i for i, ci in enumerate(contact_infos)
+                 if (ci.get("Type") or ci.get("ContactinfoType", {}).get("Name") or "") == ci_type),
+                None
+            )
+            if val:
+                if idx is not None:
+                    contact_infos[idx]["Value"] = val
+                else:
+                    contact_infos.append({"Type": ci_type, "Value": val})
+            elif idx is not None:
+                contact_infos.pop(idx)  # Alan temizlendiyse kaydı sil
+
+        payload["ContactInfoList"] = contact_infos if contact_infos else None
+        # Industries objeler listesi gönderilmemeli — TeamGram Domain zorunlu hatası verir
+        # Sektör güncellemesi IndustryIds (int listesi) ile yapılır
+        payload.pop("Industries", None)
+        payload.pop("DeliveryAddressId", None)
+
+        logger.info(f"TG Edit payload keys: {list(payload.keys())}")
+        result = await tg_svc._post(f"{tg_svc.DOMAIN}/Companies/Edit", payload)
+        logger.info(f"TG Edit result: {result}")
+        if not result or not result.get("Result"):
+            msg = result.get("Message", "Bilinmeyen hata") if result else "Yanıt alınamadı"
+            raise HTTPException(502, f"TeamGram hatası: {msg}")
+
+        # Local DB güncelle
+        c = await tg_svc._get(f"{tg_svc.DOMAIN}/Companies/Get", {"id": tg_id})
+        if c and c.get("Id"):
+            _upsert(db, _company_to_dict(c))
+            db.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Müşteri güncelleme (TG) hatası: {e}")
+        raise HTTPException(502, str(e))
+
+    # Paraşüt güncelle (opsiyonel)
+    if body.get("also_parasut") and body.get("parasut_id"):
+        parasut_id = body["parasut_id"]
+        try:
+            attrs = {
+                "name": name,
+                "tax_number": body.get("tax_no") or "",
+                "tax_office": body.get("tax_office") or "",
+                "city": body.get("city") or "",
+                "district": body.get("district") or "",
+                "address": body.get("address") or "",
+            }
+            if body.get("zip_code"):
+                attrs["postal_code"] = body["zip_code"]  # Paraşüt API: postal_code
+            attrs = {k: v for k, v in attrs.items() if v}
+            token = await _get_token()
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.put(
+                    f"{BASE}/v4/{COMPANY}/contacts/{parasut_id}",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"data": {"id": parasut_id, "type": "contacts", "attributes": attrs}}
+                )
+                if r.status_code not in (200, 201):
+                    logger.warning(f"Paraşüt güncelleme hatası: {r.text[:200]}")
+        except Exception as e:
+            logger.warning(f"Paraşüt güncelleme hatası (devam edildi): {e}")
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # GET /tg-sync-status
 # ---------------------------------------------------------------------------
 

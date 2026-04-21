@@ -134,6 +134,14 @@ Müşteri
 - Aksi hâlde TeamGram yeni boş adres kayıtları oluşturur
 - Yeni firma oluştururken adres `Address` top-level alanı olarak gönderilir
 
+#### Companies/Get vs Companies/Edit — alan adı farkları
+- `Companies/Get` → `BasicRelationType` (tekil string); `Companies/Edit` GET payload → `BasicRelationTypes` (liste)
+- `Companies/Get` → `CustomChannelId`; `Companies/Edit` payload → `Channel` (integer)
+- `Companies/Get` → `Industries` (obje listesi, `{Id, Name, ...}`); Edit'e **gönderilmez** — `Domain` required hatası verir
+- Sektör güncellemesi için `IndustryIds` (integer listesi) kullanılır
+- `Companies/Get`'te top-level `Address` null olabilir — gerçek adres `Contactinfos` listesinde (`_ADDRESS_TYPE_NAMES` ile eşleştir)
+- `Companies/Edit` GET'ten gelen payload `Industries` alanı POST'a gönderilmeden önce **kaldırılmalı**
+
 #### Contact info tip adları
 - TeamGram adres tipi: **`"İş"`** (SubType: Business, Id: 20)
 - `_company_to_dict`'te Türkçe büyük/küçük harf sorunu: `"İş".lower()` ≠ `"iş"` olduğu için exact match seti kullanılır
@@ -161,7 +169,8 @@ Müşteri
 - Önemli özellikler:
   - Yeni müşteri: `exchange_rate_type: "selling"` zorunlu
   - İsim arama: `filter[query]=...` (partial match), `filter[name]=...` exact match yapar — **kullanma**
-  - `zip_code` alanı desteklenir
+  - Posta kodu alanı: API'de `postal_code` (`zip_code` değil) — okuma ve yazma için `postal_code` kullan
+  - Paraşüt contact eşleştirme: `filter[tax_number]={vkn}` ile yapılır
 
 ---
 
@@ -180,6 +189,41 @@ Müşteri
 - `Field` bileşeni: label + value + copy butonu (tekrarlanan pattern)
 - `ActionBar` bileşeni: href (link) / onClick (navigate) / endpoint (Popconfirm + API) aksiyonları
 - Türkçe UI metinleri
+
+---
+
+## Sevk Talebi İş Akışı
+
+### Aşamalar
+| Aşama | Açıklama |
+|---|---|
+| `draft` | Taslak — Sales veya Admin oluşturur |
+| `pending_admin` | Admin onayı bekliyor |
+| `parasut_review` | Gül (warehouse) Paraşüt faturasını inceler |
+| `pending_parasut_approval` | Admin Paraşüt onayı bekliyor |
+| `preparing` | Gül kargo hazırlıyor |
+| `shipped` | Sevk edildi — son aşama |
+
+### Geçişler ve Yetkiler
+| Geçiş | Kim Yapar |
+|---|---|
+| `pending_admin` → `parasut_review` | Admin (onay) |
+| `parasut_review` → `pending_parasut_approval` | Warehouse (Gül) |
+| `pending_parasut_approval` → `preparing` | Admin (onay) |
+| `preparing` → `shipped` | Warehouse (Gül) |
+| Herhangi → `draft` (red) | Yalnızca Admin |
+
+### Rol Kapsamları
+- **admin** — Tüm talepleri görür; tüm onay/red yetkisi
+- **sales (Ahmet)** — Talep oluşturur; yalnızca kendi taleplerini görür; fatura silebilir
+- **warehouse (Gül)** — Tüm talepleri görür; `parasut_review` ve `preparing` aşamalarını ilerletir; kargo PDF/fotoğraf yükler
+
+### Bildirimler
+- Yeni talep → Admin'e
+- `pending_admin` onayı → Warehouse'a
+- `parasut_review` geçişi → Admin'e
+- `pending_parasut_approval` onayı → Warehouse'a
+- `shipped` → Sales'e; TeamGram siparişi "Sevk edildi" olarak güncellenir
 
 ---
 

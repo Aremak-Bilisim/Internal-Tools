@@ -12,6 +12,7 @@ import {
   SearchOutlined,
   PlusOutlined,
   TeamOutlined,
+  EditOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
 import api from '../services/api'
@@ -38,6 +39,7 @@ const menuItems = [
     children: [
       { key: '/customer-query', icon: <SearchOutlined />, label: 'Firma Sorgula' },
       { key: '/customer-new', icon: <PlusOutlined />, label: 'Yeni Oluştur' },
+      { key: '/customer-edit', icon: <EditOutlined />, label: 'Firma Güncelle' },
     ],
   },
 ]
