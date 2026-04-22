@@ -15,6 +15,58 @@ const { Title, Text } = Typography
 const { Option } = Select
 const { TextArea } = Input
 
+const BRAND_CODE_MAP = {
+  'Hikrobot': 'HIK', 'CST': 'CST', 'Computar': 'COM', 'Arducam': 'ARD',
+  'Kowa': 'KOW', 'Tamron': 'TMR', 'TIS': 'TIS', 'VC': 'VC', 'OPT': 'OPT',
+}
+
+const PARENT_TYPE_MAP = {
+  'Kamera': 'CAM', 'FA Lens': 'LNS', 'Telecentric Lens': 'TCL',
+  'Data Kablosu': 'CBL', 'I/O Kablosu': 'IO',
+  'Işık': 'LGT', 'Işık Kablosu': 'LGT', 'Işık Kontrolcü': 'LGT',
+  'Filtre': 'FLT', 'Lens Aksesuarı': 'LNS',
+}
+
+const CAT_SUB_MAP = {
+  'Alan Tarama': 'ASC',
+  'C': 'C', 'F': 'F', 'M12': 'M12', 'M42': 'M42', 'M72': 'M72',
+  '10GigE': '10GIGE', '10GigE Fiber': '10GIGE', '10GigE Flex': '10GIGE', '10GigE SFP+ module': '10GIGE',
+  'CXP-12': 'CXP', 'CXP-6': 'CXP',
+  'GigE': 'GIGE', 'GigE-Angle': 'GIGE',
+  'Flex GigE': 'FLEXGI', 'Flex GigE-Angle': 'FLEXGI',
+  'Super Flex GigE': 'SUPERFLEXGI', 'Super Flex USB3.0': 'SUPERFLEXUSB',
+  'Flex USB3.0': 'FLEXUSB', 'USB3.0': 'USB30', 'USB2.0': 'USB20', 'USB3.1': 'USB31',
+  '12-Pin Power/IO': '12PINPOW', '6-Pin Power/IO': '6PINPOW',
+  'Board level IO': 'BOARDLEV', 'Flex 12-Pin Power/IO': 'FLEX12PI',
+  'Flex 6-Pin Power/IO': 'FLEX6PIN', 'Super Flex 6-Pin Power/IO': 'SUPERFLE',
+  'Ring': 'RING', 'Bar': 'BAR', 'Dome': 'DOME', 'Flat': 'FLAT',
+  'Flat (with hole)': 'FLATWITHHOLE', 'Flat-Coaxial': 'FLATCOAXIAL',
+  'Coaxial': 'COAXIAL', 'Coaxial-Line-Scan': 'COAXIALLINESCAN',
+  'Arch': 'ARCH', 'AOI': 'AOI', 'Spot': 'SPOT', 'Line-Scan': 'LINESCAN',
+  'Polarized Ring': 'POLARIZEDRING', 'Shadowless Ring': 'SHADOWLESSRING',
+  'Shadowless-Dome': 'SHADOWLESSDOME', 'Shadowless-Flat': 'SHADOWLESSFLAT',
+  'Shadowless-Square': 'SHADOWLESSSQUARE',
+  'High Brightness-Coaxial': 'HIGHBRIGHTNESSCOAXIAL',
+  'High Brightness-Focused Spot': 'HIGHBRIGHTNESSFOCUSEDSPOT',
+  'High Brightness-Line-Scan': 'HIGHBRIGHTNESSLINESCAN',
+  'High Brightness-Spot': 'HIGHBRIGHTNESSSPOT',
+  'Bandpass': 'BP', 'Longpass': 'LP', 'ND': 'ND', 'Polarize': 'PL',
+  'IR Pass': 'IR', 'Adaptör': 'ADAPT',
+  'Distans Halkası': 'ACC', 'Dönüştürücü': 'ACC',
+}
+
+function generateSkuPrefix(brand, parentCatName, childCatName) {
+  const brandCode = BRAND_CODE_MAP[brand]
+  if (!brandCode || !parentCatName) return null
+  const typeCode = PARENT_TYPE_MAP[parentCatName]
+  if (!typeCode) return null
+  if (parentCatName === 'Işık Kontrolcü') return `ARMK-${brandCode}-${typeCode}-CTL-`
+  if (parentCatName === 'Işık Kablosu') return `ARMK-${brandCode}-${typeCode}-MV-`
+  const catCode = CAT_SUB_MAP[childCatName]
+  if (!catCode) return null
+  return `ARMK-${brandCode}-${typeCode}-${catCode}-`
+}
+
 const CURRENCY_OPTIONS = [
   { value: 'TL', label: 'TL (₺)' },
   { value: 'USD', label: 'USD ($)' },
@@ -57,6 +109,7 @@ export default function ProductsPage() {
   const [createLoading, setCreateLoading] = useState(false)
   const [createForm] = Form.useForm()
   const [selectedParentCat, setSelectedParentCat] = useState(null)
+  const [skuHint, setSkuHint] = useState(null)
 
   // Edit drawer
   const [editOpen, setEditOpen] = useState(false)
@@ -144,10 +197,17 @@ export default function ProductsPage() {
     ? categories.children.filter(c => c.parent_id === selectedParentCat)
     : categories.children
 
+  const updateSkuHint = (brand, parentId, catId) => {
+    const parentName = categories.parents.find(p => p.id === parentId)?.name || null
+    const childName = categories.children.find(c => c.id === catId)?.name || null
+    setSkuHint(generateSkuPrefix(brand, parentName, childName))
+  }
+
   const openCreate = () => {
     createForm.resetFields()
     createForm.setFieldsValue({ currency_name: 'TL', purchase_currency_name: 'TL', vat: 20, unit: 'adet', no_inventory: false, not_available: false })
     setSelectedParentCat(null)
+    setSkuHint(null)
     setCreateOpen(true)
   }
 
@@ -512,6 +572,7 @@ export default function ProductsPage() {
                   options={brands.map(b => ({ value: b }))}
                   placeholder="Marka seç veya yaz"
                   filterOption={(input, option) => option.value.toLowerCase().includes(input.toLowerCase())}
+                  onChange={v => updateSkuHint(v, selectedParentCat, createForm.getFieldValue('category_id'))}
                 />
               </Form.Item>
             </Col>
@@ -531,6 +592,7 @@ export default function ProductsPage() {
                   onChange={v => {
                     setSelectedParentCat(v || null)
                     createForm.setFieldValue('category_id', undefined)
+                    setSkuHint(null)
                   }}
                 >
                   {categories.parents.map(p => (
@@ -541,7 +603,11 @@ export default function ProductsPage() {
             </Col>
             <Col span={12}>
               <Form.Item name="category_id" label="Alt Kategori">
-                <Select placeholder="Alt kategori seç" allowClear>
+                <Select
+                  placeholder="Alt kategori seç"
+                  allowClear
+                  onChange={v => updateSkuHint(createForm.getFieldValue('brand'), selectedParentCat, v)}
+                >
                   {filteredChildrenForCreate.map(c => (
                     <Option key={c.id} value={c.id}>{c.name}</Option>
                   ))}
@@ -550,8 +616,20 @@ export default function ProductsPage() {
             </Col>
           </Row>
 
-          <Form.Item name="sku" label="SKU">
-            <Input placeholder="ARMK-HIK-CAM-..." />
+          <Form.Item
+            name="sku"
+            label="SKU"
+            extra={skuHint ? (
+              <span style={{ fontSize: 12 }}>
+                Öneri:{' '}
+                <a onClick={() => createForm.setFieldValue('sku', skuHint)}>
+                  <Tag color="blue" style={{ cursor: 'pointer', fontFamily: 'monospace' }}>{skuHint}</Tag>
+                </a>
+                <Text type="secondary" style={{ fontSize: 11 }}>tıkla &amp; model ekle</Text>
+              </span>
+            ) : null}
+          >
+            <Input placeholder="ARMK-HIK-CAM-ASC-..." />
           </Form.Item>
 
           <Divider orientation="left" plain style={{ fontSize: 12 }}>Fiyatlandırma</Divider>

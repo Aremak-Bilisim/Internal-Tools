@@ -581,8 +581,8 @@ def request_revision(
     s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
-    if s.stage != "pending_admin":
-        raise HTTPException(status_code=400, detail="Revizyon talebi yalnızca 'Yönetici Onayı Bekleniyor' aşamasında yapılabilir")
+    if s.stage not in ("pending_admin", "pending_parasut_approval"):
+        raise HTTPException(status_code=400, detail="Revizyon talebi bu aşamada yapılamaz")
 
     old_stage = s.stage
     s.stage = "revizyon_bekleniyor"

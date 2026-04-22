@@ -365,7 +365,7 @@ export default function ShipmentDetailPage() {
   const canShip = isPreparingStage && !!shipment.cargo_pdf_url
   const canAdvance = ADVANCE_LABELS[shipment.stage] && STAGE_ALLOWED_ROLES[shipment.stage]?.includes(user?.role)
     && (shipment.stage !== 'preparing' || canShip)
-  const canRequestRevision = user?.role === 'admin' && shipment.stage === 'pending_admin'
+  const canRequestRevision = user?.role === 'admin' && ['pending_admin', 'pending_parasut_approval'].includes(shipment.stage)
   const canReject = user?.role === 'admin' && !['shipped', 'iptal_edildi', 'draft'].includes(shipment.stage)
   const isKargo = shipment.delivery_type === 'Kargo'
 
