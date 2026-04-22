@@ -622,6 +622,56 @@ def request_revision(
     return _shipment_to_dict(s)
 
 
+@router.get("/{shipment_id}/line-items")
+async def get_shipment_line_items(
+    shipment_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """TG sipariş, Paraşüt fatura ve irsaliye kalemlerini yan yana döner."""
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+
+    result = {"tg_items": [], "invoice_items": [], "irsaliye_items": []}
+
+    if s.tg_order_id:
+        try:
+            order = await teamgram.get_order(s.tg_order_id)
+            order_lines = order.get("Items") or []
+            result["tg_items"] = [
+                {
+                    "product_name": (
+                        (line.get("Product") or {}).get("Displayname") or
+                        line.get("Title") or ""
+                    ),
+                    "product_code": (line.get("Product") or {}).get("Sku") or "",
+                    "quantity": line.get("Quantity") or 0,
+                    "unit_price": line.get("Price") or 0,
+                    "currency": line.get("CurrencyName") or order.get("CurrencyName") or "",
+                }
+                for line in order_lines
+            ]
+        except Exception as e:
+            logger.warning(f"TG order fetch failed for line-items (shipment {shipment_id}): {e}")
+
+    if s.invoice_url:
+        invoice_id = s.invoice_url.rstrip("/").split("/")[-1]
+        if invoice_id.isdigit():
+            try:
+                result["invoice_items"] = await parasut.get_invoice_line_items(invoice_id)
+            except Exception as e:
+                logger.warning(f"Parasut invoice fetch failed for line-items (shipment {shipment_id}): {e}")
+
+    if s.irsaliye_id:
+        try:
+            result["irsaliye_items"] = await parasut.get_irsaliye_line_items(s.irsaliye_id)
+        except Exception as e:
+            logger.warning(f"Parasut irsaliye fetch failed for line-items (shipment {shipment_id}): {e}")
+
+    return result
+
+
 @router.post("/{shipment_id}/return-to-parasut")
 def return_to_parasut(
     shipment_id: int,

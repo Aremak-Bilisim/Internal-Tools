@@ -71,6 +71,8 @@ export default function ShipmentDetailPage() {
   const [invoiceDetails, setInvoiceDetails] = useState(null)
   const [irsaliye, setIrsaliye] = useState(null)
   const [irsaliyePdfLoading, setIrsaliyePdfLoading] = useState(false)
+  const [lineItems, setLineItems] = useState(null)
+  const [lineItemsLoading, setLineItemsLoading] = useState(false)
   const [editDrawerOpen, setEditDrawerOpen] = useState(false)
   const [editForm] = Form.useForm()
   const [editSubmitting, setEditSubmitting] = useState(false)
@@ -105,6 +107,12 @@ export default function ShipmentDetailPage() {
             .then((ir) => setIrsaliye(ir.data))
             .catch(() => {})
         }
+        // Kalem karşılaştırma
+        setLineItemsLoading(true)
+        api.get(`/shipments/${id}/line-items`)
+          .then((li) => setLineItems(li.data))
+          .catch(() => {})
+          .finally(() => setLineItemsLoading(false))
       })
       .finally(() => setLoading(false))
   }
@@ -805,6 +813,66 @@ export default function ShipmentDetailPage() {
                   Paraşüt'te Görüntüle
                 </Button>
               </div>
+            </Card>
+          )}
+
+          {/* Kalem Özeti */}
+          {(shipment.tg_order_id || shipment.invoice_url || shipment.irsaliye_id) && (
+            <Card
+              title="Kalem Özeti"
+              size="small"
+              extra={lineItemsLoading ? <Spin size="small" /> : null}
+            >
+              {lineItems ? (
+                <Row gutter={24}>
+                  <Col span={8}>
+                    <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: '#1677ff' }}>Sipariş (TG)</Text>
+                    {lineItems.tg_items.length > 0 ? lineItems.tg_items.map((item, i) => (
+                      <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0', fontSize: 12 }}>
+                        <div style={{ fontWeight: 500, marginBottom: 2 }}>{item.product_name || '-'}</div>
+                        {item.product_code && <div style={{ color: '#888', fontSize: 11 }}>{item.product_code}</div>}
+                        <div style={{ color: '#555' }}>
+                          {item.quantity} adet
+                          {item.unit_price ? ` · ${Number(item.unit_price).toLocaleString('tr-TR')} ${item.currency || ''}` : ''}
+                        </div>
+                      </div>
+                    )) : <Text type="secondary" style={{ fontSize: 12 }}>Sipariş kalemi yok</Text>}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: '#52c41a' }}>Paraşüt Fatura</Text>
+                    {lineItems.invoice_items.length > 0 ? lineItems.invoice_items.map((item, i) => (
+                      <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0', fontSize: 12 }}>
+                        <div style={{ fontWeight: 500, marginBottom: 2 }}>{item.product_name || '-'}</div>
+                        {item.product_code && <div style={{ color: '#888', fontSize: 11 }}>{item.product_code}</div>}
+                        <div style={{ color: '#555' }}>
+                          {item.quantity} adet
+                          {item.unit_price ? ` · ${Number(item.unit_price).toLocaleString('tr-TR')} ${item.currency || ''}` : ''}
+                        </div>
+                      </div>
+                    )) : (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {shipment.invoice_url ? 'Fatura kalemi yüklenemedi' : 'Fatura kaydı yok'}
+                      </Text>
+                    )}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: '#fa8c16' }}>İrsaliye</Text>
+                    {lineItems.irsaliye_items.length > 0 ? lineItems.irsaliye_items.map((item, i) => (
+                      <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0', fontSize: 12 }}>
+                        <div style={{ fontWeight: 500, marginBottom: 2 }}>{item.product_name || '-'}</div>
+                        {item.product_code && <div style={{ color: '#888', fontSize: 11 }}>{item.product_code}</div>}
+                        <div style={{ color: '#555' }}>{item.quantity} adet</div>
+                      </div>
+                    )) : (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {shipment.irsaliye_id ? 'İrsaliye kalemi yüklenemedi' : 'İrsaliye henüz oluşturulmadı'}
+                      </Text>
+                    )}
+                  </Col>
+                </Row>
+              ) : (
+                !lineItemsLoading && <Text type="secondary" style={{ fontSize: 12 }}>Kalem bilgisi yüklenemedi.</Text>
+              )}
             </Card>
           )}
 

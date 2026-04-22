@@ -290,6 +290,81 @@ async def get_irsaliye_info(irsaliye_id: str) -> Optional[dict]:
 WAREHOUSE_ID = "1000081985"  # Ana Depo
 
 
+async def get_invoice_line_items(invoice_id: str) -> list:
+    """Paraşüt fatura kalemlerini ürün adı ve kodu ile döner."""
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{BASE}/v4/{COMPANY}/sales_invoices/{invoice_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"include": "details,details.product"},
+        )
+        if not r.is_success:
+            return []
+        data = r.json()
+
+    included = {f"{i['type']}/{i['id']}": i for i in data.get("included", [])}
+    details_rel = data["data"].get("relationships", {}).get("details", {}).get("data", [])
+
+    items = []
+    for d_ref in details_rel:
+        detail = included.get(f"{d_ref['type']}/{d_ref['id']}", {})
+        d_attrs = detail.get("attributes", {})
+        product_name = d_attrs.get("description", "")
+        product_code = ""
+        prod_rel = detail.get("relationships", {}).get("product", {}).get("data")
+        if prod_rel:
+            prod = included.get(f"{prod_rel['type']}/{prod_rel['id']}", {})
+            p_attrs = prod.get("attributes", {})
+            product_name = p_attrs.get("name", product_name)
+            product_code = p_attrs.get("code", "")
+        items.append({
+            "product_name": product_name,
+            "product_code": product_code,
+            "quantity": float(d_attrs.get("quantity") or 0),
+            "unit_price": float(d_attrs.get("unit_price") or 0),
+            "currency": d_attrs.get("currency", ""),
+            "vat_rate": d_attrs.get("vat_rate", 0),
+        })
+    return items
+
+
+async def get_irsaliye_line_items(irsaliye_id: str) -> list:
+    """Paraşüt irsaliye kalemlerini ürün adı ve kodu ile döner."""
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{BASE}/v4/{COMPANY}/shipment_documents/{irsaliye_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"include": "details,details.product"},
+        )
+        if not r.is_success:
+            return []
+        data = r.json()
+
+    included = {f"{i['type']}/{i['id']}": i for i in data.get("included", [])}
+    details_rel = data["data"].get("relationships", {}).get("details", {}).get("data", [])
+
+    items = []
+    for d_ref in details_rel:
+        detail = included.get(f"{d_ref['type']}/{d_ref['id']}", {})
+        d_attrs = detail.get("attributes", {})
+        product_name = d_attrs.get("description", "")
+        product_code = ""
+        prod_rel = detail.get("relationships", {}).get("product", {}).get("data")
+        if prod_rel:
+            prod = included.get(f"{prod_rel['type']}/{prod_rel['id']}", {})
+            p_attrs = prod.get("attributes", {})
+            product_name = p_attrs.get("name", product_name)
+            product_code = p_attrs.get("code", "")
+        items.append({
+            "product_name": product_name,
+            "product_code": product_code,
+            "quantity": float(d_attrs.get("quantity") or 0),
+        })
+    return items
+
+
 async def _api_patch(path: str, payload: dict) -> dict:
     token = await _get_token()
     async with httpx.AsyncClient(timeout=30) as client:
