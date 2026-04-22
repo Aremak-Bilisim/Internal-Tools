@@ -143,6 +143,33 @@ export default function SampleRequestsPage() {
       .finally(() => setProposalsLoading(false))
   }
 
+  const parseAddress = (fullAddress) => {
+    if (!fullAddress) return {}
+    // Ülkeyi çıkar (Türkiye / Turkey)
+    let addr = fullAddress.replace(/,?\s*(türkiye|turkey)\s*$/i, '').trim()
+    // 5 haneli posta kodunu çıkar (sadece referans — kullanıcı manuel giriyor)
+    addr = addr.replace(/,?\s*\d{5}\s*,?/g, (m) => m.startsWith(',') && m.endsWith(',') ? ',' : '').trim()
+    addr = addr.replace(/,\s*,/g, ',').replace(/,\s*$/, '').trim()
+    // Virgülle böl
+    const parts = addr.split(',').map((p) => p.trim()).filter(Boolean)
+    if (parts.length >= 3) {
+      return {
+        street: parts.slice(0, -2).join(', '),
+        district: parts[parts.length - 2],
+        city: parts[parts.length - 1],
+      }
+    }
+    if (parts.length === 2) {
+      // "İlçe/İl" formatı
+      if (parts[1].includes('/')) {
+        const [district, city] = parts[1].split('/').map((p) => p.trim())
+        return { street: parts[0], district, city }
+      }
+      return { street: parts[0], city: parts[1] }
+    }
+    return { street: addr }
+  }
+
   const handleProposalSelect = (proposalId) => {
     if (!proposalId) return
     // Proposals/Index sadece özet bilgi verir, Items için Proposals/Get gerekiyor
@@ -159,14 +186,17 @@ export default function SampleRequestsPage() {
         }))
         setOppItems(items)
 
-        // Teslimat adresi ve alıcı bilgisi — manuel değiştirilebilir
-        const address = proposal.DeliveryAddress || proposal.CustomerAddress || ''
+        // Teslimat adresi — parse et
+        const rawAddress = proposal.DeliveryAddress || proposal.CustomerAddress || ''
+        const { street, district, city } = parseAddress(rawAddress)
         const phone = proposal.CustomerPhone || proposal.CustomerMobile || ''
         const recipientName = proposal.Attn?.Displayname || proposal.Attn?.Name || ''
 
         form.setFieldsValue({
           items,
-          delivery_address: address || undefined,
+          delivery_address: street || rawAddress || undefined,
+          delivery_district: district || undefined,
+          delivery_city: city || undefined,
           recipient_phone: phone || undefined,
           recipient_name: recipientName || undefined,
         })
@@ -356,6 +386,9 @@ export default function SampleRequestsPage() {
               <Input />
             </Form.Item>
             <Form.Item label="İl" name="delivery_city" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+            <Form.Item label="Posta Kodu" name="delivery_zip" style={{ flex: 1 }}>
               <Input />
             </Form.Item>
           </div>
