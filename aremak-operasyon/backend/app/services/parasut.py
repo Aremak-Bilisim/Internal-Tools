@@ -609,6 +609,141 @@ async def create_irsaliye_from_invoice(
     return await _api_post("shipment_documents", payload)
 
 
+async def search_contact_by_tax_number(tax_number: str) -> Optional[str]:
+    """Paraşüt'te VKN ile cari arar, bulursa contact id döner."""
+    if not tax_number:
+        return None
+    try:
+        data = await _api_get("contacts", {"filter[tax_number]": tax_number.strip(), "page[size]": 5})
+        items = data.get("data", [])
+        if items:
+            return items[0]["id"]
+    except Exception as e:
+        logger.warning(f"Paraşüt contact arama hatası (vkn={tax_number}): {e}")
+    return None
+
+
+async def search_contact_by_name(name: str) -> Optional[str]:
+    """Paraşüt'te isim ile cari arar, bulursa contact id döner."""
+    if not name:
+        return None
+    try:
+        data = await _api_get("contacts", {"filter[name]": name.strip(), "page[size]": 5})
+        items = data.get("data", [])
+        if items:
+            return items[0]["id"]
+    except Exception as e:
+        logger.warning(f"Paraşüt contact arama hatası (name={name}): {e}")
+    return None
+
+
+async def create_irsaliye_for_sample(
+    contact_id: str,
+    items: list,               # [{"parasut_product_id": str, "quantity": float}]
+    issue_date: Optional[str] = None,
+    delivery_address: Optional[str] = None,
+    delivery_district: Optional[str] = None,
+    delivery_city: Optional[str] = None,
+    delivery_zip: Optional[str] = None,
+    delivery_type: Optional[str] = None,
+    cargo_company: Optional[str] = None,
+    description: str = "",
+) -> dict:
+    """
+    Faturasız (standalone) irsaliye oluşturur — numune sevkleri için.
+    Fatura ilişkisi yoktur, stok hareketleri direkt girilir.
+    """
+    import datetime
+
+    today = datetime.date.today()
+    now_utc = datetime.datetime.utcnow()
+    if not issue_date:
+        issue_date = today.isoformat()
+
+    issue_datetime_utc = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    issue_time_utc = now_utc.strftime("%H:%M:%S")
+
+    try:
+        ship_date = datetime.date.fromisoformat(issue_date)
+    except Exception:
+        ship_date = today
+    if ship_date < today:
+        ship_date = today
+    shipment_datetime = f"{ship_date.isoformat()}T12:00:00Z"
+
+    # Adres
+    delivery_address  = _strip_html(delivery_address)
+    delivery_district = _strip_html(delivery_district)
+    delivery_city     = _strip_html(delivery_city)
+    dest_zip = delivery_zip or _extract_zip(delivery_address) or "00000"
+
+    carrier_legal_name = None
+    carrier_tax_number = None
+    carrier_license_plate = None
+
+    if delivery_type == "Kargo" and cargo_company:
+        key = cargo_company.lower().strip()
+        mapped = CARGO_COMPANY_MAP.get(key)
+        if mapped:
+            carrier_legal_name, carrier_tax_number = mapped
+        else:
+            carrier_legal_name = cargo_company
+    elif delivery_type == "Ofis Teslim":
+        carrier_license_plate = "XXXXXXXX"
+        delivery_address  = "Beştepe Mah. Nergis Sok. No:7/2"
+        delivery_district = "Yenimahalle"
+        delivery_city     = "Ankara"
+        dest_zip          = "06560"
+
+    stock_movements = []
+    for item in items:
+        pid = item.get("parasut_product_id")
+        qty = float(item.get("quantity") or 0)
+        if not pid or qty <= 0:
+            continue
+        stock_movements.append({
+            "type": "stock_movements",
+            "attributes": {"quantity": qty, "inflow": False, "date": issue_date},
+            "relationships": {
+                "product": {"data": {"type": "products", "id": str(pid)}},
+                "warehouse": {"data": {"type": "warehouses", "id": WAREHOUSE_ID}},
+            },
+        })
+
+    attrs: dict = {
+        "inflow": False,
+        "issue_date": issue_date,
+        "issue_time": issue_time_utc,
+        "issue_datetime": issue_datetime_utc,
+        "shipment_date": shipment_datetime,
+        "description": description or "Numune Sevkiyatı",
+        "address":     (delivery_address or "").strip() or None,
+        "district":    (delivery_district or "").strip() or None,
+        "city":        (delivery_city or "").strip() or None,
+        "postal_code": dest_zip,
+        "company_address":     "Beştepe Mah. Nergis Sok. No:7/2",
+        "company_district":    "Yenimahalle",
+        "company_city":        "Ankara",
+        "company_postal_code": "06560",
+        "carrier_legal_name":    carrier_legal_name,
+        "carrier_tax_number":    carrier_tax_number,
+        "carrier_license_plate": carrier_license_plate,
+    }
+    attrs = {k: v for k, v in attrs.items() if v is not None}
+
+    payload = {
+        "data": {
+            "type": "shipment_documents",
+            "attributes": attrs,
+            "relationships": {
+                "contact": {"data": {"type": "contacts", "id": contact_id}},
+                "stock_movements": {"data": stock_movements},
+            },
+        }
+    }
+    return await _api_post("shipment_documents", payload)
+
+
 async def get_all_products() -> list:
     """Paraşüt'teki tüm ürünleri sayfalı olarak çeker.
     Returns: [{"id": str, "code": str, "name": str}, ...]"""

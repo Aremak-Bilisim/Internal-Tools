@@ -55,11 +55,19 @@ export default function SampleDetailPage() {
   const [editForm] = Form.useForm()
   const [editSubmitting, setEditSubmitting] = useState(false)
   const editDeliveryType = Form.useWatch('delivery_type', editForm)
+  const [irsaliye, setIrsaliye] = useState(null)
 
   const load = () => {
     setLoading(true)
     api.get(`/samples/${id}`)
-      .then((r) => setSample(r.data))
+      .then((r) => {
+        setSample(r.data)
+        if (r.data.irsaliye_id) {
+          api.get(`/parasut/irsaliye/${r.data.irsaliye_id}`)
+            .then((ir) => setIrsaliye(ir.data))
+            .catch(() => {})
+        }
+      })
       .catch(() => message.error('Talep yüklenemedi'))
       .finally(() => setLoading(false))
   }
@@ -241,6 +249,26 @@ export default function SampleDetailPage() {
               size="small"
               pagination={false}
             />
+          </Card>
+
+          {/* İrsaliye */}
+          <Card title="İrsaliye" size="small" style={{ marginBottom: 16 }}>
+            {sample.irsaliye_id ? (
+              irsaliye ? (
+                <Descriptions size="small" column={1}>
+                  <Descriptions.Item label="İrsaliye No">{irsaliye.irsaliye_no || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Tarih">{irsaliye.issue_date || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Cari">{irsaliye.contact_name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Paraşüt">
+                    <a href={irsaliye.url} target="_blank" rel="noreferrer">Paraşüt'te Aç</a>
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Spin size="small" />
+              )
+            ) : (
+              <Text type="secondary">İrsaliye henüz oluşturulmadı.</Text>
+            )}
           </Card>
 
           {/* Photos */}

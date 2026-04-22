@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import uuid
@@ -10,7 +11,8 @@ from app.core.auth import get_current_user, require_role
 from app.models.sample import SampleRequest, SampleHistory
 from app.models.user import User
 from app.models.notification import Notification
-from app.services import teamgram
+from app.models.product import Product
+from app.services import teamgram, parasut
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -198,7 +200,85 @@ def create_sample(
 
     db.commit()
     db.refresh(s)
-    return _sample_to_dict(s)
+
+    result = _sample_to_dict(s)
+    warnings = _create_irsaliye_for_sample(db, s, data.tg_opportunity_id)
+    result["warnings"] = warnings
+    return result
+
+
+def _create_irsaliye_for_sample(db: Session, s: SampleRequest, tg_opportunity_id: Optional[int]) -> list:
+    """
+    Talep oluşturulduğu anda Paraşüt'te irsaliye yarat.
+    irsaliye_id zaten doluysa hiçbir şey yapma (revizyon sonrası yeniden gönderimde çalışmaz).
+    """
+    if s.irsaliye_id:
+        return []
+
+    warnings = []
+    try:
+        # 1. Paraşüt contact: önce VKN ile dene, bulamazsan isimle
+        contact_id = None
+        if tg_opportunity_id:
+            try:
+                opp = asyncio.run(teamgram.get_opportunity(tg_opportunity_id))
+                entity = opp.get("RelatedEntity") or {}
+                tax_no = (entity.get("TaxNo") or "").strip()
+                if tax_no:
+                    contact_id = asyncio.run(parasut.search_contact_by_tax_number(tax_no))
+            except Exception as e:
+                logger.warning(f"TG fırsat çekilemedi (id={tg_opportunity_id}): {e}")
+
+        if not contact_id and s.customer_name:
+            contact_id = asyncio.run(parasut.search_contact_by_name(s.customer_name))
+
+        if not contact_id:
+            warnings.append(f"Paraşüt'te '{s.customer_name}' carisi bulunamadı. İrsaliye oluşturulamadı.")
+            return warnings
+
+        # 2. TG product ID → Paraşüt product ID (local DB üzerinden)
+        parasut_items = []
+        for item in (s.items or []):
+            tg_id = item.get("product_id")
+            qty = float(item.get("quantity") or 0)
+            if not tg_id or qty <= 0:
+                continue
+            product = db.query(Product).filter(Product.tg_id == tg_id).first()
+            if product and product.parasut_id:
+                parasut_items.append({"parasut_product_id": product.parasut_id, "quantity": qty})
+            else:
+                warnings.append(f"'{item.get('product_name', tg_id)}' ürününün Paraşüt eşleşmesi yok, irsaliyeye eklenmedi.")
+
+        if not parasut_items:
+            warnings.append("Hiçbir ürün Paraşüt'te eşleşmedi. İrsaliye boş oluşmaz, atlandı.")
+            return warnings
+
+        # 3. İrsaliye oluştur
+        result = asyncio.run(parasut.create_irsaliye_for_sample(
+            contact_id=contact_id,
+            items=parasut_items,
+            issue_date=s.planned_ship_date,
+            delivery_address=s.delivery_address,
+            delivery_district=s.delivery_district,
+            delivery_city=s.delivery_city,
+            delivery_zip=s.delivery_zip,
+            delivery_type=s.delivery_type,
+            cargo_company=s.cargo_company,
+            description=f"Numune — {s.customer_name}",
+        ))
+        irsaliye_id = result.get("data", {}).get("id")
+        if irsaliye_id:
+            s.irsaliye_id = irsaliye_id
+            db.commit()
+            logger.info(f"Numune irsaliyesi oluşturuldu: sample_id={s.id} irsaliye_id={irsaliye_id}")
+        else:
+            warnings.append("İrsaliye oluşturuldu ancak ID alınamadı.")
+    except Exception as e:
+        msg = f"Paraşüt irsaliye oluşturulamadı: {e}"
+        logger.error(msg)
+        warnings.append(msg)
+
+    return warnings
 
 
 @router.get("/{sample_id}")
