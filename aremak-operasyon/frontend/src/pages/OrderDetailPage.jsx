@@ -61,32 +61,32 @@ export default function OrderDetailPage() {
     const fetchAll = async () => {
       setLoading(true)
       try {
-        const [orderRes, invoicesRes] = await Promise.allSettled([
+        const [orderRes, shipmentsRes, invoicesRes] = await Promise.allSettled([
           api.get(`/orders/${id}`),
+          api.get('/shipments'),
           api.get('/parasut/invoices'),
         ])
 
         const o = orderRes.status === 'fulfilled' ? orderRes.value.data : null
         setOrder(o)
 
-        // Sevkiyatı tg_order_id ile doğrudan çek
-        try {
-          const shipRes = await api.get(`/shipments?tg_order_id=${id}`)
-          const found = (shipRes.data || [])[0] || null
-          setShipment(found)
-          if (found?.invoice_url) {
-            const invId = found.invoice_url.split('/').pop()
-            if (invId) {
-              api.get(`/parasut/invoices/${invId}/details`)
-                .then((r) => setInvoiceDetails(r.data))
-                .catch(() => {})
-            }
+        if (shipmentsRes.status === 'fulfilled') {
+          const found = shipmentsRes.value.data.find((s) => s.tg_order_id === Number(id))
+          setShipment(found || null)
+          // Fatura detaylarını çek
+          const invId = found?.invoice_url?.split('/').pop()
+          if (invId) {
+            api.get(`/parasut/invoices/${invId}/details`)
+              .then((r) => setInvoiceDetails(r.data))
+              .catch(() => {})
           }
+          // İrsaliye bilgisini çek
           if (found?.irsaliye_id) {
             api.get(`/parasut/irsaliye/${found.irsaliye_id}`)
               .then((r) => setIrsaliye(r.data))
               .catch(() => {})
           }
+          // Kalem karşılaştırma
           if (found?.id) {
             setLineItemsLoading(true)
             api.get(`/shipments/${found.id}/line-items`)
@@ -94,7 +94,7 @@ export default function OrderDetailPage() {
               .catch(() => {})
               .finally(() => setLineItemsLoading(false))
           }
-        } catch { /* sevkiyat bulunamazsa sessizce geç */ }
+        }
 
         if (invoicesRes.status === 'fulfilled' && o) {
           const invs = invoicesRes.value.data.invoices || []
