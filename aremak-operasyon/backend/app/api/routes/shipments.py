@@ -581,8 +581,8 @@ def request_revision(
     s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
-    if s.stage not in ("pending_admin", "pending_parasut_approval"):
-        raise HTTPException(status_code=400, detail="Revizyon talebi bu aşamada yapılamaz")
+    if s.stage != "pending_admin":
+        raise HTTPException(status_code=400, detail="Revizyon talebi yalnızca 'Yönetici Onayı Bekleniyor' aşamasında yapılabilir")
 
     old_stage = s.stage
     s.stage = "revizyon_bekleniyor"
@@ -598,12 +598,10 @@ def request_revision(
     db.commit()
     db.refresh(s)
 
-    # pending_parasut_approval → sevk sorumlusuna (assigned_to) bildir
-    # diğer aşamalar → oluşturana (created_by) bildir
     shipment_dict = _shipment_to_dict(s)
     order_name = s.tg_order_name or s.customer_name
     revision_note = data.note or ""
-    notif_user = s.assigned_to if old_stage == "pending_parasut_approval" else s.created_by
+    notif_user = s.created_by
     if notif_user:
         notif_list = [(email_svc._notif_email(notif_user), notif_user.name)]
         try:
@@ -620,5 +618,53 @@ def request_revision(
             db.commit()
         except Exception as e:
             logger.error(f"In-app notification failed (revizyon_bekleniyor): {e}")
+
+    return _shipment_to_dict(s)
+
+
+@router.post("/{shipment_id}/return-to-parasut")
+def return_to_parasut(
+    shipment_id: int,
+    data: StageAdvance,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin")),
+):
+    """Paraşüt Onayı Bekleniyor → Paraşüt Kontrolü aşamasına geri döndür."""
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    if s.stage != "pending_parasut_approval":
+        raise HTTPException(status_code=400, detail="Bu işlem yalnızca 'Paraşüt Onayı Bekleniyor' aşamasında yapılabilir")
+
+    note = data.note or ""
+    s.stage = "parasut_review"
+    db.add(ShipmentHistory(
+        shipment_id=s.id,
+        stage_from="pending_parasut_approval",
+        stage_to="parasut_review",
+        note=f"[PARASUT TEKRAR] {note}".strip(),
+        user_id=current_user.id,
+    ))
+    db.commit()
+    db.refresh(s)
+
+    shipment_dict = _shipment_to_dict(s)
+    order_name = s.tg_order_name or s.customer_name
+    warehouse_users = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
+    try:
+        email_svc.send_approved_to_warehouse(shipment_dict, [(email_svc._notif_email(u), u.name) for u in warehouse_users], note, actor_name=current_user.name)
+    except Exception as e:
+        logger.error(f"Email failed (return-to-parasut): {e}")
+    try:
+        for u in warehouse_users:
+            db.add(Notification(
+                user_id=u.id,
+                title=f"Paraşüt Kontrolü Tekrar: {order_name}",
+                message=f"{current_user.name} Paraşüt kontrolünün tekrar yapılmasını istedi. {note}".strip(),
+                shipment_id=s.id,
+            ))
+        db.commit()
+    except Exception as e:
+        logger.error(f"In-app notification failed (return-to-parasut): {e}")
 
     return _shipment_to_dict(s)

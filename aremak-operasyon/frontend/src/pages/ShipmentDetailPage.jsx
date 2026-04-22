@@ -260,6 +260,9 @@ export default function ShipmentDetailPage() {
         if (!noteText.trim()) { message.warning('Revizyon notu zorunludur'); setNoteModal('revision'); return }
         await api.post(`/shipments/${id}/request-revision`, { note: noteText })
         message.warning('Revizyon talep edildi')
+      } else if (noteModal === 'return-to-parasut') {
+        await api.post(`/shipments/${id}/return-to-parasut`, { note: noteText || undefined })
+        message.warning('Paraşüt kontrolü tekrarlatıldı')
       } else {
         await api.post(`/shipments/${id}/reject`, { note: noteText || 'İptal edildi' })
         message.warning('Talep iptal edildi')
@@ -365,7 +368,8 @@ export default function ShipmentDetailPage() {
   const canShip = isPreparingStage && !!shipment.cargo_pdf_url
   const canAdvance = ADVANCE_LABELS[shipment.stage] && STAGE_ALLOWED_ROLES[shipment.stage]?.includes(user?.role)
     && (shipment.stage !== 'preparing' || canShip)
-  const canRequestRevision = user?.role === 'admin' && ['pending_admin', 'pending_parasut_approval'].includes(shipment.stage)
+  const canRequestRevision = user?.role === 'admin' && shipment.stage === 'pending_admin'
+  const canReturnToParasut = user?.role === 'admin' && shipment.stage === 'pending_parasut_approval'
   const canReject = user?.role === 'admin' && !['shipped', 'iptal_edildi', 'draft'].includes(shipment.stage)
   const isKargo = shipment.delivery_type === 'Kargo'
 
@@ -505,7 +509,7 @@ export default function ShipmentDetailPage() {
               </div>
             )}
 
-            {(canAdvance || canRequestRevision || canReject || isPreparingStage) && (
+            {(canAdvance || canRequestRevision || canReturnToParasut || canReject || isPreparingStage) && (
               <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {/* revizyon_bekleniyor aşamasında düzenleme formu aç */}
                 {shipment.stage === 'revizyon_bekleniyor' && STAGE_ALLOWED_ROLES['revizyon_bekleniyor']?.includes(user?.role) ? (
@@ -525,6 +529,12 @@ export default function ShipmentDetailPage() {
                     Revizyon Talep Et
                   </Button>
                 )}
+                {canReturnToParasut && (
+                  <Button icon={<RollbackOutlined />} onClick={() => openNoteModal('return-to-parasut')} loading={advancing}
+                    style={{ borderColor: '#faad14', color: '#faad14' }}>
+                    Paraşüt Kontrolünü Tekrarla
+                  </Button>
+                )}
                 {canReject && (
                   <Button danger icon={<RollbackOutlined />} onClick={() => openNoteModal('reject')} loading={advancing}>
                     İptal Et
@@ -537,13 +547,17 @@ export default function ShipmentDetailPage() {
               title={
                 noteModal === 'reject' ? 'İptal Et — Not Ekle'
                 : noteModal === 'revision' ? 'Revizyon Talep Et'
+                : noteModal === 'return-to-parasut' ? 'Paraşüt Kontrolünü Tekrarla'
                 : `${ADVANCE_LABELS[shipment?.stage] || 'Onayla'} — Not Ekle`
               }
               open={!!noteModal}
               onOk={submitWithNote}
               onCancel={() => setNoteModal(null)}
-              okText={noteModal === 'reject' ? 'İptal Et' : noteModal === 'revision' ? 'Revizyon Talep Et' : 'Onayla'}
-              okButtonProps={{ danger: noteModal === 'reject', style: noteModal === 'revision' ? { background: '#fa8c16', borderColor: '#fa8c16' } : undefined }}
+              okText={noteModal === 'reject' ? 'İptal Et' : noteModal === 'revision' ? 'Revizyon Talep Et' : noteModal === 'return-to-parasut' ? 'Tekrarla' : 'Onayla'}
+              okButtonProps={{
+                danger: noteModal === 'reject',
+                style: (noteModal === 'revision' || noteModal === 'return-to-parasut') ? { background: '#fa8c16', borderColor: '#fa8c16' } : undefined
+              }}
               cancelText="Vazgeç"
             >
               <TextArea
@@ -551,6 +565,7 @@ export default function ShipmentDetailPage() {
                 placeholder={(() => {
                   if (noteModal === 'reject') return 'İsteğe bağlı not (satış personeline görünür)'
                   if (noteModal === 'revision') return 'Revizyon açıklaması (zorunlu) — satış personeline gönderilir'
+                  if (noteModal === 'return-to-parasut') return 'İsteğe bağlı not — sevk sorumlusuna gönderilir'
                   const adminStages = ['parasut_review']
                   const warehouseStages = ['pending_admin', 'pending_parasut_approval']
                   if (adminStages.includes(shipment?.stage)) return 'İsteğe bağlı not (yöneticiye görünür)'
