@@ -59,6 +59,7 @@ async def list_products(
     category_id: Optional[int] = Query(None),
     in_stock: Optional[bool] = Query(None),
     not_available: Optional[bool] = Query(None),
+    parasut_only: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -83,6 +84,8 @@ async def list_products(
     else:
         # Varsayılan: pasif ürünleri gösterme
         q = q.filter(Product.not_available == False)
+    if parasut_only:
+        q = q.filter(Product.parasut_id.isnot(None))
 
     total = q.count()
     items = q.order_by(Product.brand, Product.prod_model).offset((page - 1) * pagesize).limit(pagesize).all()

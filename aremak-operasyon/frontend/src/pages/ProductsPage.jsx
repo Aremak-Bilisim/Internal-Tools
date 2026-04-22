@@ -53,6 +53,7 @@ export default function ProductsPage() {
   const [catFilter, setCatFilter] = useState(null)
   const [inStockFilter, setInStockFilter] = useState(null)
   const [showPassive, setShowPassive] = useState(false)
+  const [parasutOnly, setParasutOnly] = useState(false)
   const searchTimer = useRef(null)
 
   // Categories
@@ -95,6 +96,7 @@ export default function ProductsPage() {
       if (catFilter != null) params.set('category_id', catFilter)
       if (inStockFilter != null) params.set('in_stock', inStockFilter)
       if (showPassive) params.set('not_available', 'true')
+      if (parasutOnly) params.set('parasut_only', 'true')
       const r = await api.get(`/products?${params}`)
       setData(r.data)
     } catch (e) {
@@ -102,7 +104,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pagesize, search, parentCatFilter, catFilter, inStockFilter, showPassive])
+  }, [page, pagesize, search, parentCatFilter, catFilter, inStockFilter, showPassive, parasutOnly])
 
   useEffect(() => { fetchCategories() }, [])
   useEffect(() => { fetchData() }, [fetchData])
@@ -462,6 +464,12 @@ export default function ProductsPage() {
             <Space>
               <Switch checked={showPassive} onChange={v => { setShowPassive(v); setPage(1) }} size="small" />
               <Text style={{ fontSize: 12 }}>Pasif ürünleri göster</Text>
+            </Space>
+          </Col>
+          <Col>
+            <Space>
+              <Switch checked={parasutOnly} onChange={v => { setParasutOnly(v); setPage(1) }} size="small" />
+              <Text style={{ fontSize: 12 }}>Yalnızca Paraşüt'tekileri göster</Text>
             </Space>
           </Col>
         </Row>
