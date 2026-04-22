@@ -149,6 +149,8 @@ export default function SampleRequestsPage() {
     api.get(`/samples/proposals/${proposalId}`)
       .then((r) => {
         const proposal = r.data
+
+        // Ürünler
         const items = (proposal.Items || []).map((item) => ({
           product_id: item.Product?.Id || null,
           product_name: item.Product?.Displayname || item.Product?.Name || item.Title || '',
@@ -156,7 +158,18 @@ export default function SampleRequestsPage() {
           shelf: '',
         }))
         setOppItems(items)
-        form.setFieldValue('items', items)
+
+        // Teslimat adresi ve alıcı bilgisi — manuel değiştirilebilir
+        const address = proposal.DeliveryAddress || proposal.CustomerAddress || ''
+        const phone = proposal.CustomerPhone || proposal.CustomerMobile || ''
+        const recipientName = proposal.Attn?.Displayname || proposal.Attn?.Name || ''
+
+        form.setFieldsValue({
+          items,
+          delivery_address: address || undefined,
+          recipient_phone: phone || undefined,
+          recipient_name: recipientName || undefined,
+        })
       })
       .catch(() => message.error('Teklif detayı yüklenemedi'))
   }
