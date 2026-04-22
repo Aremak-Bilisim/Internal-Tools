@@ -535,11 +535,13 @@ async def create_irsaliye_from_invoice(
 async def get_all_products() -> list:
     """Paraşüt'teki tüm ürünleri sayfalı olarak çeker.
     Returns: [{"id": str, "code": str, "name": str}, ...]"""
+    import asyncio as _asyncio
     all_items = []
     page = 1
+    page_size = 25  # Paraşüt products endpoint max 25
     while True:
         try:
-            data = await _api_get("products", {"page[number]": page, "page[size]": 100})
+            data = await _api_get("products", {"page[number]": page, "page[size]": page_size})
         except Exception as e:
             logger.error(f"Paraşüt ürün listesi hata (sayfa {page}): {e}")
             break
@@ -558,6 +560,7 @@ async def get_all_products() -> list:
         if page >= total_pages:
             break
         page += 1
+        await _asyncio.sleep(0.3)  # rate limit: ~3 req/sn
     logger.info(f"Paraşüt ürün listesi çekildi: {len(all_items)} ürün")
     return all_items
 
