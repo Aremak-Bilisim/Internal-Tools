@@ -53,11 +53,31 @@ aremak-operasyon/
 ### Önemli modeller
 - `TeamgramCompany` — TeamGram şirketlerinin local mirror'ı
 - `User`, `ShipmentRequest`, `ShipmentHistory`, `Notification`
+- `Product` — TeamGram ürünlerinin local mirror'ı (`products` tablosu)
 
 ### Background sync
 - Startup'ta DB boşsa **full sync**, doluysa **incremental sync** çalışır
 - Full sync: her 24 saatte bir
 - Incremental sync: her 1 saatte bir (`Companies/GetUpdated`)
+
+#### Ürün sync (`product_sync.py`)
+- Startup'ta `full_sync()` → TG `Products/GetAll` sayfalı çeker, DB'ye upsert eder
+- Her **6 saatte bir** TG full sync tekrarlanır
+- Startup'ta ayrıca `sync_parasut_match()` çalışır → Paraşüt'teki tüm ürünler çekilir, SKU eşleştirilir, `parasut_id` DB'ye yazılır
+- Her **24 saatte bir** Paraşüt eşleştirme tekrarlanır
+- Manuel tetikleyiciler: `POST /api/products/sync` (TG), `POST /api/products/sync-parasut` (Paraşüt)
+
+#### DB migration notu
+SQLAlchemy `create_all` mevcut tabloya yeni kolon **eklemez**. Yeni kolon eklendiğinde prod ve local'de manuel çalıştır:
+```bash
+python -c "
+from app.core.database import engine
+import sqlalchemy
+with engine.connect() as conn:
+    conn.execute(sqlalchemy.text('ALTER TABLE products ADD COLUMN parasut_id VARCHAR'))
+    conn.commit()
+"
+```
 
 ### Full sync zorla
 ```bash
@@ -88,13 +108,22 @@ print('Silindi')
 | Route | Sayfa |
 |---|---|
 | `/dashboard` | Dashboard |
-| `/products` | Ürünler |
+| `/products` | Ürünler (TG+Paraşüt sync, CRUD, filtre) |
 | `/orders` | Müşteri Siparişleri |
 | `/orders/:id` | Sipariş Detayı |
 | `/shipments` | Sevkiyatlar |
 | `/shipments/:id` | Sevkiyat Detayı |
 | `/customer-query` | Firma Sorgula (VKN + Ünvan modu) |
 | `/customer-new` | Yeni Müşteri Oluştur |
+
+#### ProductsPage özellikleri
+- Tablo: Marka, Model, SKU, Kategori (Ana/Alt), Satış/Alış Fiyatı, KDV, Birim, Stok, Bağlantı ikonları
+- Bağlantı ikonu: TG (her zaman yeşil, tıklanabilir) + Paraşüt (mavi=kayıtlı, gri=kayıtsız)
+- Filtreler: metin arama, ana kategori, alt kategori, stok durumu, pasif toggle, Paraşüt'teki toggle
+- Yeni Ürün drawer: tüm alanlar + SKU otomatik önerisi
+- Düzenleme drawer: mevcut verilerle açılır
+- Detay drawer: TG ve Paraşüt linkleri + Descriptions
+- TG Sync / Paraşüt Sync butonları (manuel tetikleyici)
 
 ### Menü yapısı
 ```
@@ -146,6 +175,32 @@ Müşteri
 - TeamGram adres tipi: **`"İş"`** (SubType: Business, Id: 20)
 - `_company_to_dict`'te Türkçe büyük/küçük harf sorunu: `"İş".lower()` ≠ `"iş"` olduğu için exact match seti kullanılır
 
+#### Ürün endpointleri
+- `Products/GetAll?id=0&page=X&pagesize=100` → `{count, page, pageSize, products: [...]}`
+- `Products/Get?id=X` → tek ürün; `Category` obje olarak gelir `{Id, Name, Level}`
+- `Products/Edit` GET → mevcut edit payload (Create POST ile aynı format)
+- `Products/Create` POST → `{Result: true, Id: N}`
+- `Products/Edit` POST → `{Result: true, Id: N}`
+- `Products/Delete` POST → `{Result: true}`
+- Kategoriler: `ScheduledRequests/MetaData` → `Categories` listesi (`Level=0` ana, `Level=1` alt, `ParentId` ile bağlı)
+
+#### Ürün para birimi ID'leri
+| ID | Para birimi |
+|---|---|
+| 1 | TL |
+| 2 | USD |
+| 3 | EUR |
+
+Create/Edit payload'ında `CurrencyId` ve `PurchaseCurrencyId` integer kullanılır. `GetAll`'da `CurrencyName` string olarak gelir.
+
+#### Ürün SKU kuralı
+Format: `ARMK-{MARKA}-{KATEGORI}-{MODEL}` — tüm segmentler büyük harf, ayraç tire.
+Örnek: `ARMK-HIK-CAM-MV-CA050-10GC`
+
+#### Ürün attachment proxy
+`GET /api/orders/proxy/attachment?url=...` — TeamGram dosyalarını auth header'ı ile backend üzerinden sunar.
+Domain whitelist: `api.teamgram.com`, `teamgram.com`, `cdn.teamgram.com`
+
 #### Özel alanlar (custom fields)
 | Alan | CustomFieldId | Tip | Notlar |
 |---|---|---|---|
@@ -184,6 +239,9 @@ Müşteri
   - Posta kodu alanı: API'de `postal_code` (`zip_code` değil) — okuma ve yazma için `postal_code` kullan
   - Paraşüt contact eşleştirme: `filter[tax_number]={vkn}` ile yapılır
   - İrsaliye URL formatı: `https://uygulama.parasut.com/{company}/giden-irsaliyeler/{id}` (`irsaliyeler` **değil**, `giden-irsaliyeler`)
+  - Ürün arama: `GET /products?filter[code]={sku}` (stok koduna göre)
+  - Ürün listesi: `GET /products?page[number]=X&page[size]=100` — `meta.total_pages` ile sayfalama
+  - Ürün URL formatı: `https://uygulama.parasut.com/{company}/stok/{id}`
 
 ---
 
