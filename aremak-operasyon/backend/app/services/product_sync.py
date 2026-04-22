@@ -16,7 +16,8 @@ from app.services import teamgram
 
 logger = logging.getLogger(__name__)
 
-FULL_SYNC_INTERVAL = 6 * 3600   # 6 saat
+FULL_SYNC_INTERVAL = 6 * 3600    # 6 saat — TG ürün sync
+PARASUT_SYNC_INTERVAL = 24 * 3600  # 24 saat — Paraşüt eşleştirme
 _syncing = False
 
 
@@ -137,17 +138,56 @@ async def sync_one(tg_id: int):
         db.close()
 
 
-async def start_background_sync():
-    """Backend başlarken çağrılır. Full sync yapar, sonra 6 saatte bir tekrar çalışır."""
+async def sync_parasut_match():
+    """Paraşüt'teki tüm ürünleri çekip SKU üzerinden lokal products tablosuyla eşleştirir.
+    Eşleşen ürünlere parasut_id yazar, eşleşmeyenleri temizler."""
+    from app.services.parasut import get_all_products as get_parasut_products
+    logger.info("Paraşüt ürün eşleştirme başladı...")
+    try:
+        parasut_products = await get_parasut_products()
+    except Exception as e:
+        logger.error(f"Paraşüt ürün listesi alınamadı: {e}")
+        return
+
+    # SKU → parasut_id haritası (boş kodları atla)
+    sku_map = {p["code"]: p["id"] for p in parasut_products if p["code"]}
+    logger.info(f"Paraşüt'te {len(sku_map)} stok kodlu ürün bulundu")
+
     db = SessionLocal()
     try:
-        count = db.query(Product).count()
+        local_products = db.query(Product).all()
+        updated = 0
+        for lp in local_products:
+            new_pid = sku_map.get(lp.sku) if lp.sku else None
+            if lp.parasut_id != new_pid:
+                lp.parasut_id = new_pid
+                updated += 1
+        db.commit()
+        logger.info(f"Paraşüt eşleştirme tamamlandı: {updated} ürün güncellendi")
+    except Exception as e:
+        logger.error(f"Paraşüt eşleştirme DB hatası: {e}")
+        db.rollback()
     finally:
         db.close()
 
-    # DB boşsa veya her zaman sync et
-    await full_sync()
 
+async def start_background_sync():
+    """Backend başlarken çağrılır. TG full sync + Paraşüt eşleştirme yapar, sonra döngüde tekrar çalışır."""
+    await full_sync()
+    await sync_parasut_match()
+
+    elapsed_tg = 0
+    elapsed_parasut = 0
     while True:
-        await asyncio.sleep(FULL_SYNC_INTERVAL)
-        await full_sync()
+        sleep_interval = min(FULL_SYNC_INTERVAL, PARASUT_SYNC_INTERVAL)
+        await asyncio.sleep(sleep_interval)
+        elapsed_tg += sleep_interval
+        elapsed_parasut += sleep_interval
+
+        if elapsed_tg >= FULL_SYNC_INTERVAL:
+            await full_sync()
+            elapsed_tg = 0
+
+        if elapsed_parasut >= PARASUT_SYNC_INTERVAL:
+            await sync_parasut_match()
+            elapsed_parasut = 0

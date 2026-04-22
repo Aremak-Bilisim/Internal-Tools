@@ -532,9 +532,38 @@ async def create_irsaliye_from_invoice(
     return await _api_post("shipment_documents", payload)
 
 
+async def get_all_products() -> list:
+    """Paraşüt'teki tüm ürünleri sayfalı olarak çeker.
+    Returns: [{"id": str, "code": str, "name": str}, ...]"""
+    all_items = []
+    page = 1
+    while True:
+        try:
+            data = await _api_get("products", {"page[number]": page, "page[size]": 100})
+        except Exception as e:
+            logger.error(f"Paraşüt ürün listesi hata (sayfa {page}): {e}")
+            break
+        items = data.get("data", [])
+        if not items:
+            break
+        for p in items:
+            attrs = p.get("attributes", {})
+            all_items.append({
+                "id": p["id"],
+                "code": attrs.get("code") or "",
+                "name": attrs.get("name") or "",
+            })
+        meta = data.get("meta", {})
+        total_pages = meta.get("total_pages", 1)
+        if page >= total_pages:
+            break
+        page += 1
+    logger.info(f"Paraşüt ürün listesi çekildi: {len(all_items)} ürün")
+    return all_items
+
+
 async def search_product_by_code(code: str) -> Optional[dict]:
-    """Paraşüt'te stok kodu (code) ile ürün arar. Eşleşen ilk ürünü döndürür.
-    Returns: {id, name, code, url} ya da None."""
+    """Paraşüt'te stok kodu (code) ile ürün arar. Eşleşen ilk ürünü döndürür."""
     if not code:
         return None
     try:

@@ -337,6 +337,29 @@ export default function ProductsPage() {
       },
     },
     {
+      title: 'Bağlantı',
+      key: 'links',
+      width: 90,
+      fixed: 'right',
+      render: (_, r) => (
+        <Space size={4}>
+          <Tooltip title="TeamGram'da Aç">
+            <a href={r.tg_url} target="_blank" rel="noreferrer">
+              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 16 }} />
+            </a>
+          </Tooltip>
+          <Tooltip title={r.parasut_id ? "Paraşüt'te Aç" : "Paraşüt'te kayıtlı değil"}>
+            {r.parasut_id
+              ? <a href={r.parasut_url} target="_blank" rel="noreferrer">
+                  <CheckCircleOutlined style={{ color: '#1677ff', fontSize: 16 }} />
+                </a>
+              : <QuestionCircleOutlined style={{ color: '#d9d9d9', fontSize: 16 }} />
+            }
+          </Tooltip>
+        </Space>
+      ),
+    },
+    {
       title: '',
       key: 'actions',
       width: 60,
@@ -456,7 +479,7 @@ export default function ProductsPage() {
             showTotal: (t) => `Toplam ${t} ürün`,
             showSizeChanger: false,
           }}
-          scroll={{ x: 1100 }}
+          scroll={{ x: 1220 }}
           size="small"
         />
       </Card>
@@ -802,28 +825,11 @@ export default function ProductsPage() {
                   Paraşüt'te Aç
                 </Button>
               ) : (
-                <Button
-                  icon={<QuestionCircleOutlined />}
-                  size="small"
-                  loading={parasutLoading}
-                  onClick={() => checkParasut(detailRecord)}
-                >
-                  Paraşüt'te Kontrol Et
+                <Button icon={<QuestionCircleOutlined />} size="small" disabled>
+                  Paraşüt'te Kayıtlı Değil
                 </Button>
               )}
             </div>
-
-            {/* Paraşüt kontrol sonucu */}
-            {parasutCheck && !parasutCheck.found && (
-              <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fff2f0', borderRadius: 6, fontSize: 12, color: '#cf1322' }}>
-                {parasutCheck.message}
-              </div>
-            )}
-            {parasutCheck?.found && (
-              <div style={{ marginBottom: 12, padding: '6px 12px', background: '#f6ffed', borderRadius: 6, fontSize: 12, color: '#389e0d' }}>
-                ✓ Paraşüt'te bulundu — <a href={parasutCheck.url} target="_blank" rel="noreferrer">{parasutCheck.name || parasutCheck.code}</a>
-              </div>
-            )}
 
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="Marka">{detailRecord.brand || '-'}</Descriptions.Item>
