@@ -240,8 +240,8 @@ Domain whitelist: `api.teamgram.com`, `teamgram.com`, `cdn.teamgram.com`
   - Paraşüt contact eşleştirme: `filter[tax_number]={vkn}` ile yapılır
   - İrsaliye URL formatı: `https://uygulama.parasut.com/{company}/giden-irsaliyeler/{id}` (`irsaliyeler` **değil**, `giden-irsaliyeler`)
   - Ürün arama: `GET /products?filter[code]={sku}` (stok koduna göre)
-  - Ürün listesi: `GET /products?page[number]=X&page[size]=100` — `meta.total_pages` ile sayfalama
-  - Ürün URL formatı: `https://uygulama.parasut.com/{company}/stok/{id}`
+  - Ürün listesi: `GET /products?page[number]=X&page[size]=25` — max 25 (100 → 422), `meta.total_pages` ile sayfalama, sayfalar arası 0.3s bekleme (429 koruması)
+  - Ürün URL formatı: `https://uygulama.parasut.com/{company}/hizmet-ve-urunler/{id}`
 
 ---
 

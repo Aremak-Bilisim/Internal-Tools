@@ -43,8 +43,9 @@ def _to_dict(p: Product) -> dict:
         "details": p.details,
         "not_available": p.not_available,
         "tg_url": f"https://www.teamgram.com/{TG_DOMAIN}/products/show?id={p.tg_id}",
-        "parasut_url": f"https://uygulama.parasut.com/{PARASUT_COMPANY}/stok/{p.parasut_id}" if p.parasut_id else None,
+        "parasut_url": f"https://uygulama.parasut.com/{PARASUT_COMPANY}/hizmet-ve-urunler/{p.parasut_id}" if p.parasut_id else None,
         "parasut_id": p.parasut_id,
+        "datasheet_url": p.datasheet_url,
     }
 
 
@@ -90,6 +91,17 @@ async def list_products(
     total = q.count()
     items = q.order_by(Product.brand, Product.prod_model).offset((page - 1) * pagesize).limit(pagesize).all()
     return {"total": total, "page": page, "pagesize": pagesize, "items": [_to_dict(p) for p in items]}
+
+
+# ── BRANDS ────────────────────────────────────────────────────────────────────
+
+@router.get("/brands")
+async def get_brands(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    rows = db.query(Product.brand).filter(Product.brand.isnot(None)).distinct().order_by(Product.brand).all()
+    return [r[0] for r in rows]
 
 
 # ── CATEGORIES ────────────────────────────────────────────────────────────────
@@ -217,6 +229,7 @@ class ProductEdit(BaseModel):
     critical_inventory: Optional[int] = None
     details: Optional[str] = None
     not_available: Optional[bool] = None
+    datasheet_url: Optional[str] = None
 
 
 @router.put("/{product_id}")
@@ -260,6 +273,9 @@ async def edit_product(
         edit_payload["Details"] = body.details
     if body.not_available is not None:
         edit_payload["NotAvaliable"] = body.not_available
+    if body.datasheet_url is not None:
+        edit_payload["CategoryId"] = edit_payload.get("CategoryId") or 0
+        edit_payload["CustomFieldDatas"] = [{"CustomFieldId": 193440, "Value": body.datasheet_url or ""}]
 
     result = await teamgram.edit_product(edit_payload)
     if not result.get("Result"):
@@ -269,6 +285,26 @@ async def edit_product(
     await product_sync.sync_one(product_id)
 
     return {"message": "Ürün güncellendi"}
+
+
+# ── DELETE ───────────────────────────────────────────────────────────────────
+
+@router.delete("/{product_id}")
+async def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    result = await teamgram.delete_product(product_id)
+    if not result.get("Result"):
+        raise HTTPException(status_code=500, detail=f"TeamGram silme hatası: {result}")
+
+    p = db.query(Product).filter(Product.tg_id == product_id).first()
+    if p:
+        db.delete(p)
+        db.commit()
+
+    return {"message": "Ürün silindi"}
 
 
 # ── PARAŞÜT KONTROL ──────────────────────────────────────────────────────────

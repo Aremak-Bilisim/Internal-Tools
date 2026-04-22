@@ -88,8 +88,12 @@ export default function OrderDetailPage() {
 
         if (invoicesRes.status === 'fulfilled' && o) {
           const invs = invoicesRes.value.data.invoices || []
-          const name = (o.RelatedEntity?.Displayname || o.RelatedEntity?.Name || '').trim().toLowerCase()
-          const found = invs.find((inv) => (inv.contact_name_normalized || '').includes(name.slice(0, 15)) || name.includes((inv.contact_name_normalized || '').slice(0, 15)))
+          const normTR = (s) => (s || '').replace(/İ/g, 'i').replace(/I/g, 'ı').trim().toLocaleLowerCase('tr-TR')
+          const name = normTR(o.RelatedEntity?.Displayname || o.RelatedEntity?.Name || '')
+          const found = invs.find((inv) => {
+            const cn = inv.contact_name_normalized || ''
+            return cn === name || cn.includes(name.slice(0, 20)) || name.includes(cn.slice(0, 20))
+          })
           setInvoice(found || null)
         }
       } finally {

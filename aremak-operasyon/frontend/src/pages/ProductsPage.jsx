@@ -2,11 +2,12 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Table, Input, Card, Tag, Typography, Spin, Button, Drawer, Form,
   InputNumber, Select, Row, Col, Space, Divider, Tooltip, Badge,
-  Popconfirm, message, Switch, Descriptions, Empty,
+  Popconfirm, message, Switch, Descriptions, Empty, AutoComplete,
 } from 'antd'
 import {
   SearchOutlined, PlusOutlined, ReloadOutlined, EditOutlined,
   BoxPlotOutlined, LinkOutlined, CheckCircleOutlined, QuestionCircleOutlined,
+  DeleteOutlined, FilePdfOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 
@@ -30,16 +31,6 @@ function formatPrice(price, currency) {
   return `${price.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${sym}`
 }
 
-// SKU oluşturma: ARMK-{BRAND}-{SUBCAT}-{MODEL}
-function generateSku(brand, model, categoryName) {
-  const clean = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
-  const b = clean(brand)
-  const c = clean(categoryName)
-  const m = clean(model)
-  if (!b && !m) return ''
-  return ['ARMK', b, c, m].filter(Boolean).join('-')
-}
-
 export default function ProductsPage() {
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(true)
@@ -57,15 +48,15 @@ export default function ProductsPage() {
   const [parasutOnly, setParasutOnly] = useState(false)
   const searchTimer = useRef(null)
 
-  // Categories
+  // Categories & brands
   const [categories, setCategories] = useState({ parents: [], children: [] })
+  const [brands, setBrands] = useState([])
 
   // Create drawer
   const [createOpen, setCreateOpen] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
   const [createForm] = Form.useForm()
   const [selectedParentCat, setSelectedParentCat] = useState(null)
-  const [autoSku, setAutoSku] = useState('')
 
   // Edit drawer
   const [editOpen, setEditOpen] = useState(false)
@@ -73,7 +64,6 @@ export default function ProductsPage() {
   const [editForm] = Form.useForm()
   const [editRecord, setEditRecord] = useState(null)
   const [editParentCat, setEditParentCat] = useState(null)
-  const [editAutoSku, setEditAutoSku] = useState('')
 
   // Detail drawer
   const [detailOpen, setDetailOpen] = useState(false)
@@ -83,8 +73,12 @@ export default function ProductsPage() {
 
   const fetchCategories = useCallback(async () => {
     try {
-      const r = await api.get('/products/categories')
-      setCategories(r.data)
+      const [catRes, brandRes] = await Promise.all([
+        api.get('/products/categories'),
+        api.get('/products/brands'),
+      ])
+      setCategories(catRes.data)
+      setBrands(brandRes.data)
     } catch {}
   }, [])
 
@@ -150,16 +144,10 @@ export default function ProductsPage() {
     ? categories.children.filter(c => c.parent_id === selectedParentCat)
     : categories.children
 
-  const updateAutoSku = (brand, model, catId) => {
-    const catName = categories.children.find(c => c.id === catId)?.name || ''
-    setAutoSku(generateSku(brand, model, catName))
-  }
-
   const openCreate = () => {
     createForm.resetFields()
     createForm.setFieldsValue({ currency_name: 'TL', purchase_currency_name: 'TL', vat: 20, unit: 'adet', no_inventory: false, not_available: false })
     setSelectedParentCat(null)
-    setAutoSku('')
     setCreateOpen(true)
   }
 
@@ -171,7 +159,7 @@ export default function ProductsPage() {
       const payload = {
         brand: values.brand,
         prod_model: values.prod_model,
-        sku: values.sku || autoSku || '',
+        sku: values.sku || '',
         price: values.price || null,
         currency_name: values.currency_name,
         purchase_price: values.purchase_price || null,
@@ -201,11 +189,6 @@ export default function ProductsPage() {
     ? categories.children.filter(c => c.parent_id === editParentCat)
     : categories.children
 
-  const updateEditAutoSku = (brand, model, catId) => {
-    const catName = categories.children.find(c => c.id === catId)?.name || ''
-    setEditAutoSku(generateSku(brand, model, catName))
-  }
-
   const openEdit = (record) => {
     setEditRecord(record)
     // Find parent category
@@ -228,8 +211,8 @@ export default function ProductsPage() {
       critical_inventory: record.critical_inventory,
       details: record.details,
       not_available: record.not_available,
+      datasheet_url: record.datasheet_url || '',
     })
-    setEditAutoSku(record.sku || '')
     setEditOpen(true)
   }
 
@@ -251,6 +234,17 @@ export default function ProductsPage() {
     }
   }
 
+  const handleDelete = async (record) => {
+    try {
+      await api.delete(`/products/${record.tg_id}`)
+      message.success('Ürün silindi')
+      setEditOpen(false)
+      fetchData()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Silme başarısız')
+    }
+  }
+
   const submitEdit = async () => {
     let values
     try { values = await editForm.validateFields() } catch { return }
@@ -259,7 +253,7 @@ export default function ProductsPage() {
       const payload = {
         brand: values.brand,
         prod_model: values.prod_model,
-        sku: values.sku || editAutoSku || '',
+        sku: values.sku || '',
         price: values.price || null,
         currency_name: values.currency_name,
         purchase_price: values.purchase_price || null,
@@ -271,6 +265,7 @@ export default function ProductsPage() {
         critical_inventory: values.critical_inventory || 0,
         details: values.details || null,
         not_available: values.not_available || false,
+        datasheet_url: values.datasheet_url || null,
       }
       await api.put(`/products/${editRecord.tg_id}`, payload)
       message.success('Ürün güncellendi')
@@ -318,6 +313,16 @@ export default function ProductsPage() {
       ),
     },
     {
+      title: 'Stok',
+      key: 'inventory',
+      width: 80,
+      render: (_, r) => {
+        if (r.no_inventory) return <Tag>Takipsiz</Tag>
+        const v = r.inventory ?? 0
+        return <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>
+      },
+    },
+    {
       title: 'Satış Fiyatı',
       key: 'price',
       width: 130,
@@ -328,29 +333,6 @@ export default function ProductsPage() {
       key: 'purchase',
       width: 130,
       render: (_, r) => formatPrice(r.purchase_price, r.purchase_currency_name),
-    },
-    {
-      title: 'KDV',
-      dataIndex: 'vat',
-      key: 'vat',
-      width: 70,
-      render: (v) => v != null ? `%${v}` : '-',
-    },
-    {
-      title: 'Birim',
-      dataIndex: 'unit',
-      key: 'unit',
-      width: 70,
-    },
-    {
-      title: 'Stok',
-      key: 'inventory',
-      width: 80,
-      render: (_, r) => {
-        if (r.no_inventory) return <Tag>Takipsiz</Tag>
-        const v = r.inventory ?? 0
-        return <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>
-      },
     },
     {
       title: 'Bağlantı',
@@ -526,26 +508,16 @@ export default function ProductsPage() {
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="brand" label="Marka" rules={[{ required: true, message: 'Marka giriniz' }]}>
-                <Input
-                  placeholder="örn: Nikon"
-                  onChange={e => {
-                    const catId = createForm.getFieldValue('category_id')
-                    const model = createForm.getFieldValue('prod_model')
-                    updateAutoSku(e.target.value, model, catId)
-                  }}
+                <AutoComplete
+                  options={brands.map(b => ({ value: b }))}
+                  placeholder="Marka seç veya yaz"
+                  filterOption={(input, option) => option.value.toLowerCase().includes(input.toLowerCase())}
                 />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="prod_model" label="Model" rules={[{ required: true, message: 'Model giriniz' }]}>
-                <Input
-                  placeholder="örn: D750"
-                  onChange={e => {
-                    const catId = createForm.getFieldValue('category_id')
-                    const brand = createForm.getFieldValue('brand')
-                    updateAutoSku(brand, e.target.value, catId)
-                  }}
-                />
+                <Input placeholder="örn: MV-CA020-20GM" />
               </Form.Item>
             </Col>
           </Row>
@@ -569,15 +541,7 @@ export default function ProductsPage() {
             </Col>
             <Col span={12}>
               <Form.Item name="category_id" label="Alt Kategori">
-                <Select
-                  placeholder="Alt kategori seç"
-                  allowClear
-                  onChange={v => {
-                    const brand = createForm.getFieldValue('brand')
-                    const model = createForm.getFieldValue('prod_model')
-                    updateAutoSku(brand, model, v)
-                  }}
-                >
+                <Select placeholder="Alt kategori seç" allowClear>
                   {filteredChildrenForCreate.map(c => (
                     <Option key={c.id} value={c.id}>{c.name}</Option>
                   ))}
@@ -586,15 +550,8 @@ export default function ProductsPage() {
             </Col>
           </Row>
 
-          <Form.Item
-            name="sku"
-            label={
-              <span>
-                SKU{autoSku && <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>Otomatik: {autoSku}</Text>}
-              </span>
-            }
-          >
-            <Input placeholder={autoSku || 'ARMK-...'} />
+          <Form.Item name="sku" label="SKU">
+            <Input placeholder="ARMK-HIK-CAM-..." />
           </Form.Item>
 
           <Divider orientation="left" plain style={{ fontSize: 12 }}>Fiyatlandırma</Divider>
@@ -669,34 +626,37 @@ export default function ProductsPage() {
         onClose={() => setEditOpen(false)}
         width={560}
         footer={
-          <Space style={{ float: 'right' }}>
-            <Button onClick={() => setEditOpen(false)}>İptal</Button>
-            <Button type="primary" loading={editLoading} onClick={submitEdit}>Kaydet</Button>
-          </Space>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Popconfirm
+              title="Ürünü sil"
+              description="Bu ürün TeamGram'dan kalıcı olarak silinecek. Emin misiniz?"
+              onConfirm={() => handleDelete(editRecord)}
+              okText="Evet, Sil"
+              okButtonProps={{ danger: true }}
+              cancelText="Vazgeç"
+            >
+              <Button danger icon={<DeleteOutlined />}>Sil</Button>
+            </Popconfirm>
+            <Space>
+              <Button onClick={() => setEditOpen(false)}>İptal</Button>
+              <Button type="primary" loading={editLoading} onClick={submitEdit}>Kaydet</Button>
+            </Space>
+          </div>
         }
       >
         <Form form={editForm} layout="vertical">
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="brand" label="Marka" rules={[{ required: true }]}>
-                <Input
-                  onChange={e => {
-                    const catId = editForm.getFieldValue('category_id')
-                    const model = editForm.getFieldValue('prod_model')
-                    updateEditAutoSku(e.target.value, model, catId)
-                  }}
+                <AutoComplete
+                  options={brands.map(b => ({ value: b }))}
+                  filterOption={(input, option) => option.value.toLowerCase().includes(input.toLowerCase())}
                 />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="prod_model" label="Model" rules={[{ required: true }]}>
-                <Input
-                  onChange={e => {
-                    const catId = editForm.getFieldValue('category_id')
-                    const brand = editForm.getFieldValue('brand')
-                    updateEditAutoSku(brand, e.target.value, catId)
-                  }}
-                />
+                <Input />
               </Form.Item>
             </Col>
           </Row>
@@ -718,31 +678,14 @@ export default function ProductsPage() {
             </Col>
             <Col span={12}>
               <Form.Item name="category_id" label="Alt Kategori">
-                <Select
-                  placeholder="Alt kategori"
-                  allowClear
-                  onChange={v => {
-                    const brand = editForm.getFieldValue('brand')
-                    const model = editForm.getFieldValue('prod_model')
-                    updateEditAutoSku(brand, model, v)
-                  }}
-                >
+                <Select placeholder="Alt kategori" allowClear>
                   {filteredChildrenForEdit.map(c => <Option key={c.id} value={c.id}>{c.name}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
           </Row>
 
-          <Form.Item
-            name="sku"
-            label={
-              <span>
-                SKU{editAutoSku && editAutoSku !== editRecord?.sku && (
-                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>Otomatik: {editAutoSku}</Text>
-                )}
-              </span>
-            }
-          >
+          <Form.Item name="sku" label="SKU">
             <Input />
           </Form.Item>
 
@@ -778,14 +721,14 @@ export default function ProductsPage() {
 
           <Divider orientation="left" plain style={{ fontSize: 12 }}>Diğer Bilgiler</Divider>
           <Row gutter={12}>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="vat" label="KDV (%)">
                 <Select>
                   {VAT_OPTIONS.map(v => <Option key={v} value={v}>%{v}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="unit" label="Birim">
                 <Select>
                   {['adet', 'set', 'kg', 'metre', 'litre', 'kutu', 'paket'].map(u => (
@@ -794,7 +737,24 @@ export default function ProductsPage() {
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={8}>
+          </Row>
+
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Mevcut Stok">
+                {editRecord && (
+                  editRecord.no_inventory
+                    ? <Tag>Takipsiz</Tag>
+                    : <Tag color={editRecord.inventory > 0 ? 'green' : 'red'} style={{ fontSize: 14, padding: '2px 10px' }}>
+                        {editRecord.inventory ?? 0}
+                      </Tag>
+                )}
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                  Stok TG üzerinden yönetilir
+                </Text>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
               <Form.Item name="critical_inventory" label="Kritik Stok">
                 <InputNumber style={{ width: '100%' }} min={0} />
               </Form.Item>
@@ -807,6 +767,10 @@ export default function ProductsPage() {
 
           <Form.Item name="details" label="Açıklama / Detay">
             <TextArea rows={3} />
+          </Form.Item>
+
+          <Form.Item name="datasheet_url" label="Datasheet URL">
+            <Input placeholder="https://..." />
           </Form.Item>
 
           <Form.Item name="not_available" label="Pasif" valuePropName="checked">
@@ -852,6 +816,16 @@ export default function ProductsPage() {
               ) : (
                 <Button icon={<QuestionCircleOutlined />} size="small" disabled>
                   Paraşüt'te Kayıtlı Değil
+                </Button>
+              )}
+              {detailRecord.datasheet_url && (
+                <Button
+                  icon={<FilePdfOutlined />}
+                  href={detailRecord.datasheet_url}
+                  target="_blank"
+                  size="small"
+                >
+                  Datasheet
                 </Button>
               )}
             </div>

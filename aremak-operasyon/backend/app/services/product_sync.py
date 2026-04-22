@@ -31,12 +31,17 @@ def _currency_id_to_name(cid: Optional[int]) -> Optional[str]:
     return mapping.get(cid)
 
 
+CF_DATASHEET = 193440  # Datasheet (Web adresi)
+
+
 def _product_to_dict(p: dict, parent_map: dict) -> dict:
     """TeamGram product dict → DB dict. parent_map: {cat_id: (parent_id, parent_name)}"""
     cat = p.get("Category") or {}
     cat_id = cat.get("Id")
     cat_name = cat.get("Name")
     parent_id, parent_name = parent_map.get(cat_id, (None, None))
+
+    cfs = {cf["CustomFieldId"]: cf.get("Value") for cf in (p.get("CustomFieldDatas") or [])}
 
     return {
         "tg_id": p["Id"],
@@ -58,6 +63,7 @@ def _product_to_dict(p: dict, parent_map: dict) -> dict:
         "critical_inventory": p.get("CriticalInventory") or 0,
         "details": p.get("Details"),
         "not_available": bool(p.get("NotAvaliable")),
+        "datasheet_url": cfs.get(CF_DATASHEET) or None,
     }
 
 

@@ -77,6 +77,15 @@ async def edit_product(payload: dict) -> dict:
         return r.json()
 
 
+async def delete_product(product_id: int) -> dict:
+    """TeamGram'da ürün sil. Returns {Result}."""
+    url = f"{BASE}/{DOMAIN}/Products/Delete"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json={"Id": product_id})
+        r.raise_for_status()
+        return r.json()
+
+
 async def get_orders(page: int = 1, pagesize: int = 50, status: Optional[str] = None) -> dict:
     """
     status=None   → all orders: open (fid=0) + closed (fid=-1) merged, includes HasInvoice

@@ -580,7 +580,7 @@ async def search_product_by_code(code: str) -> Optional[dict]:
                 "id": pid,
                 "name": attrs.get("name"),
                 "code": attrs.get("code"),
-                "url": f"https://uygulama.parasut.com/{COMPANY}/stok/{pid}",
+                "url": f"https://uygulama.parasut.com/{COMPANY}/hizmet-ve-urunler/{pid}",
             }
     except Exception as e:
         logger.warning(f"Paraşüt ürün arama hatası ({code}): {e}")
