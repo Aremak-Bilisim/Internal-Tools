@@ -274,7 +274,7 @@ def _create_irsaliye_for_sample(db: Session, s: SampleRequest, tg_opportunity_id
             delivery_zip=s.delivery_zip,
             delivery_type=s.delivery_type,
             cargo_company=s.cargo_company,
-            description=f"Numune — {s.customer_name}",
+            description=f"Numune - {s.tg_opportunity_name or s.customer_name}",
         ))
         irsaliye_id = result.get("data", {}).get("id")
         if irsaliye_id:
