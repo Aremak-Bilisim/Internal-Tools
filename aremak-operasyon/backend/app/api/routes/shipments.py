@@ -598,19 +598,21 @@ def request_revision(
     db.commit()
     db.refresh(s)
 
-    # Notify creator
+    # pending_parasut_approval → sevk sorumlusuna (assigned_to) bildir
+    # diğer aşamalar → oluşturana (created_by) bildir
     shipment_dict = _shipment_to_dict(s)
     order_name = s.tg_order_name or s.customer_name
     revision_note = data.note or ""
-    if s.created_by:
-        creator_list = [(email_svc._notif_email(s.created_by), s.created_by.name)]
+    notif_user = s.assigned_to if old_stage == "pending_parasut_approval" else s.created_by
+    if notif_user:
+        notif_list = [(email_svc._notif_email(notif_user), notif_user.name)]
         try:
-            email_svc.send_revision_requested(shipment_dict, creator_list, revision_note, actor_name=current_user.name)
+            email_svc.send_revision_requested(shipment_dict, notif_list, revision_note, actor_name=current_user.name)
         except Exception as e:
             logger.error(f"Email failed (revizyon_bekleniyor): {e}")
         try:
             db.add(Notification(
-                user_id=s.created_by.id,
+                user_id=notif_user.id,
                 title=f"Revizyon Gerekiyor: {order_name}",
                 message=f"{current_user.name} revizyon istedi. {revision_note}".strip(),
                 shipment_id=s.id,
