@@ -50,6 +50,33 @@ async def get_products_all(page: int = 1, pagesize: int = 100) -> dict:
     return await _get(f"{DOMAIN}/Products/GetAll", {"id": 0, "page": page, "pagesize": pagesize})
 
 
+async def create_product(payload: dict) -> dict:
+    """TeamGram'da yeni ürün oluştur. Returns {Result, Id}."""
+    url = f"{BASE}/{DOMAIN}/Products/Create"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_product_edit_payload(product_id: int) -> dict:
+    """Products/Edit GET → mevcut ürünün tam edit payload'ını döndürür."""
+    url = f"{BASE}/{DOMAIN}/Products/Edit"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(url, headers=HEADERS, params={"id": product_id})
+        r.raise_for_status()
+        return r.json()
+
+
+async def edit_product(payload: dict) -> dict:
+    """TeamGram'da ürün güncelle. payload içinde Id zorunlu."""
+    url = f"{BASE}/{DOMAIN}/Products/Edit"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
 async def get_orders(page: int = 1, pagesize: int = 50, status: Optional[str] = None) -> dict:
     """
     status=None   → all orders: open (fid=0) + closed (fid=-1) merged, includes HasInvoice

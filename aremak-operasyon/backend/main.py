@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 
 # Tüm modelleri yükle (create_all için)
-from app.models import user, shipment, notification, teamgram_company  # noqa
+from app.models import user, shipment, notification, teamgram_company, product  # noqa
 Base.metadata.create_all(bind=engine)
 
 
@@ -23,14 +23,17 @@ Base.metadata.create_all(bind=engine)
 async def lifespan(app: FastAPI):
     # Startup: TeamGram sync arka planda başlat
     from app.services.tg_sync import start_background_sync
-    task = asyncio.create_task(start_background_sync())
+    from app.services.product_sync import start_background_sync as start_product_sync
+    task1 = asyncio.create_task(start_background_sync())
+    task2 = asyncio.create_task(start_product_sync())
     yield
     # Shutdown
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for task in [task1, task2]:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Aremak Operasyon API", version="0.1.0", lifespan=lifespan)
