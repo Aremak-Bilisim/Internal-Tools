@@ -108,12 +108,15 @@ def _shipment_to_dict(s: ShipmentRequest) -> dict:
 @router.get("")
 def list_shipments(
     stage: Optional[str] = Query(None),
+    tg_order_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     q = db.query(ShipmentRequest)
     if stage:
         q = q.filter(ShipmentRequest.stage == stage)
+    if tg_order_id is not None:
+        q = q.filter(ShipmentRequest.tg_order_id == tg_order_id)
     # Sales users only see their own shipments
     if current_user.role == "sales":
         q = q.filter(ShipmentRequest.created_by_id == current_user.id)
