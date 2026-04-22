@@ -32,11 +32,11 @@ const menuItems = [
     ],
   },
   {
-    key: 'satislar',
+    key: 'sevkiyatlar',
     icon: <SendOutlined />,
-    label: 'Satışlar',
+    label: 'Sevkiyatlar',
     children: [
-      { key: '/shipments', icon: <SendOutlined />, label: 'Sevkiyatlar' },
+      { key: '/shipments', icon: <SendOutlined />, label: 'Satışlar' },
     ],
   },
   {
@@ -152,7 +152,7 @@ export default function AppLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['siparisler', 'satislar', 'musteri']}
+          defaultOpenKeys={['siparisler', 'sevkiyatlar', 'musteri']}
           items={menuItems}
           onClick={({ key }) => { if (key.startsWith('/')) navigate(key) }}
           style={{ marginTop: 8 }}
