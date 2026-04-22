@@ -102,6 +102,11 @@ export default function SampleRequestsPage() {
 
   const openModal = () => {
     setModalOpen(true)
+    form.setFieldsValue({
+      delivery_type: 'Kargo',
+      cargo_company: 'Yurtiçi Kargo',
+      planned_ship_date: dayjs(),
+    })
     setOppsLoading(true)
     api.get('/samples/opportunities')
       .then((r) => setOpportunities(r.data.List || []))
@@ -145,11 +150,21 @@ export default function SampleRequestsPage() {
 
   const parseAddress = (fullAddress) => {
     if (!fullAddress) return {}
-    // Ülkeyi çıkar (Türkiye / Turkey)
+    // Ülkeyi çıkar
     let addr = fullAddress.replace(/,?\s*(türkiye|turkey)\s*$/i, '').trim()
-    // 5 haneli posta kodunu çıkar (sadece referans — kullanıcı manuel giriyor)
-    addr = addr.replace(/,?\s*\d{5}\s*,?/g, (m) => m.startsWith(',') && m.endsWith(',') ? ',' : '').trim()
-    addr = addr.replace(/,\s*,/g, ',').replace(/,\s*$/, '').trim()
+    // Posta kodunu çıkar
+    addr = addr.replace(/,?\s*\b\d{5}\b\s*,?/g, ',').replace(/,\s*,/g, ',').replace(/^,|,$/g, '').trim()
+
+    // Sonda "İlçe/İl" veya "İlçe/ İl" formatını yakala (virgülsüz de olabilir)
+    const slashEnd = addr.match(/^(.*?)\s+([^,/]+)\s*\/\s*([^,/]+)\s*$/s)
+    if (slashEnd) {
+      return {
+        street: slashEnd[1].replace(/,\s*$/, '').trim(),
+        district: slashEnd[2].trim(),
+        city: slashEnd[3].trim(),
+      }
+    }
+
     // Virgülle böl
     const parts = addr.split(',').map((p) => p.trim()).filter(Boolean)
     if (parts.length >= 3) {
@@ -160,11 +175,6 @@ export default function SampleRequestsPage() {
       }
     }
     if (parts.length === 2) {
-      // "İlçe/İl" formatı
-      if (parts[1].includes('/')) {
-        const [district, city] = parts[1].split('/').map((p) => p.trim())
-        return { street: parts[0], district, city }
-      }
       return { street: parts[0], city: parts[1] }
     }
     return { street: addr }
