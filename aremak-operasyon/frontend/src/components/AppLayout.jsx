@@ -36,7 +36,7 @@ const menuItems = [
     icon: <SendOutlined />,
     label: 'Sevkiyatlar',
     children: [
-      { key: '/shipments', icon: <SendOutlined />, label: 'Satışlar' },
+      { key: '/shipments', icon: <SendOutlined />, label: 'Satış Sevkleri' },
     ],
   },
   {

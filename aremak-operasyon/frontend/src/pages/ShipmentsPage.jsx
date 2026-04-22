@@ -165,7 +165,7 @@ export default function ShipmentsPage() {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Sevkiyatlar</Title>
+        <Title level={4} style={{ margin: 0 }}>Satış Sevkleri</Title>
       </div>
 
       {/* Aksiyon Kartları */}
