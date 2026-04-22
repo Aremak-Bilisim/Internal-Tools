@@ -296,7 +296,7 @@ export default function SampleRequestsPage() {
               onChange={handleOppSelect}
               options={(opportunities || []).map((o) => ({
                 value: o.Id,
-                label: `${o.RelatedEntityName || ''} — ${o.Title || ''}`,
+                label: o.Displayname || o.Name || `Fırsat #${o.Id}`,
               }))}
             />
           </Form.Item>
