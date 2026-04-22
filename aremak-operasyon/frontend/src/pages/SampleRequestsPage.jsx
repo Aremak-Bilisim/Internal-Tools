@@ -61,6 +61,8 @@ export default function SampleRequestsPage() {
   const [opportunities, setOpportunities] = useState([])
   const [oppsLoading, setOppsLoading] = useState(false)
   const [selectedOpp, setSelectedOpp] = useState(null)
+  const [proposals, setProposals] = useState([])
+  const [proposalsLoading, setProposalsLoading] = useState(false)
   const [oppItems, setOppItems] = useState([])
   const [form] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
@@ -111,13 +113,42 @@ export default function SampleRequestsPage() {
     const opp = opportunities.find((o) => o.Id === oppId)
     if (!opp) return
     setSelectedOpp(opp)
-    const company = opp.RelatedEntity || {}
+    setProposals([])
     form.setFieldsValue({
-      customer_name: opp.RelatedEntityName || company.Name || '',
+      customer_name: opp.RelatedEntityName || opp.RelatedEntity?.Name || '',
+      tg_proposal_id: undefined,
     })
-    const items = (opp.Items || []).map((item) => ({
-      product_id: item.Product?.Id || null,
-      product_name: item.Product?.Displayname || item.Title || '',
+    form.setFieldValue('items', [])
+    setOppItems([])
+
+    // Fırsata ait teklifleri yükle
+    setProposalsLoading(true)
+    api.get(`/samples/opportunities/${oppId}/proposals`)
+      .then((r) => {
+        const list = r.data.List || []
+        setProposals(list)
+        // Teklif yoksa fırsat kalemleri fallback
+        if (list.length === 0) {
+          const items = (opp.Items || []).map((item) => ({
+            product_id: item.Product?.Id || null,
+            product_name: item.Product?.Displayname || item.Title || '',
+            quantity: item.Quantity || 1,
+            shelf: '',
+          }))
+          setOppItems(items)
+          form.setFieldValue('items', items)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setProposalsLoading(false))
+  }
+
+  const handleProposalSelect = (proposalId) => {
+    const proposal = proposals.find((p) => p.Id === proposalId)
+    if (!proposal) return
+    const items = (proposal.Items || proposal.Lines || proposal.Products || []).map((item) => ({
+      product_id: item.Product?.Id || item.ProductId || null,
+      product_name: item.Product?.Displayname || item.Product?.Name || item.Title || item.ProductName || '',
       quantity: item.Quantity || 1,
       shelf: '',
     }))
@@ -264,6 +295,25 @@ export default function SampleRequestsPage() {
               }))}
             />
           </Form.Item>
+
+          {selectedOpp && (
+            <Form.Item
+              label="Teklif"
+              name="tg_proposal_id"
+              extra={proposals.length === 0 && !proposalsLoading ? 'Bu fırsata ait teklif bulunamadı, fırsat kalemleri kullanılacak.' : null}
+            >
+              <Select
+                loading={proposalsLoading}
+                placeholder="Teklif seçin (opsiyonel)..."
+                allowClear
+                onChange={handleProposalSelect}
+                options={(proposals).map((p) => ({
+                  value: p.Id,
+                  label: p.Title || p.Name || p.ProposalNo || `Teklif #${p.Id}`,
+                }))}
+              />
+            </Form.Item>
+          )}
 
           <Form.Item label="Müşteri Adı" name="customer_name" rules={[{ required: true }]}>
             <Input />

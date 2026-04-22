@@ -131,6 +131,11 @@ async def get_opportunity(opp_id: int, current_user=Depends(get_current_user)):
     return await teamgram.get_opportunity(opp_id)
 
 
+@router.get("/opportunities/{opp_id}/proposals")
+async def get_opportunity_proposals(opp_id: int, current_user=Depends(get_current_user)):
+    return await teamgram.get_proposals_for_opportunity(opp_id)
+
+
 # ── Sample CRUD ───────────────────────────────────────────────────────────────
 
 @router.get("")
