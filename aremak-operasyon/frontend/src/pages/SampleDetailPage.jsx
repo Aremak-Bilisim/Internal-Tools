@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, Upload, Image, Drawer, Form, Select, InputNumber, DatePicker } from 'antd'
-import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, UploadOutlined, EditOutlined } from '@ant-design/icons'
+import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Modal, Input, Upload, Image, Drawer, Form, Select, InputNumber, DatePicker, Row, Col } from 'antd'
+import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, CloseOutlined, UploadOutlined, EditOutlined, SendOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 const STAGE_COLORS = {
@@ -46,10 +46,9 @@ export default function SampleDetailPage() {
   const [sample, setSample] = useState(null)
   const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState(false)
-  const [noteModal, setNoteModal] = useState(null)  // 'advance' | 'revize' | null
+  const [noteModal, setNoteModal] = useState(null)  // 'advance' | 'revize' | 'reject' | null
   const [noteText, setNoteText] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
-  const [revizing, setRevizing] = useState(false)
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
   const [editDrawerOpen, setEditDrawerOpen] = useState(false)
   const [editForm] = Form.useForm()
@@ -74,64 +73,41 @@ export default function SampleDetailPage() {
 
   useEffect(() => { load() }, [id])
 
-  const canAdvance = () => {
-    if (!sample || !user) return false
-    const roles = STAGE_ROLES[sample.stage]
-    if (!roles) return false
-    return roles.includes(user.role) || user.role === 'admin'
+  const canAdvance = sample && user && STAGE_ROLES[sample.stage]?.includes(user.role)
+  const canRequestRevision = user?.role === 'admin' && sample?.stage === 'pending_admin'
+  const canReject = user?.role === 'admin' && !['shipped', 'iptal_edildi'].includes(sample?.stage)
+
+  const openNoteModal = (type) => {
+    setNoteText('')
+    setTrackingNo('')
+    setNoteModal(type)
   }
 
-  const canCancel = () => {
-    if (!sample || !user) return false
-    if (sample.stage === 'shipped' || sample.stage === 'iptal_edildi') return false
-    return user.role === 'admin' || user.role === 'sales'
-  }
-
-  const handleAdvance = async () => {
+  const submitWithNote = async () => {
     setAdvancing(true)
+    setNoteModal(null)
     try {
-      const payload = { note: noteText || null }
-      if (sample.stage === 'preparing') {
-        payload.cargo_tracking_no = trackingNo || null
+      if (noteModal === 'advance') {
+        const payload = { note: noteText || undefined }
+        if (sample.stage === 'preparing') payload.cargo_tracking_no = trackingNo || undefined
+        const r = await api.post(`/samples/${id}/advance`, payload)
+        setSample(r.data)
+        if (r.data.warnings?.length) r.data.warnings.forEach((w) => message.warning(w, 8))
+        message.success('Aşama güncellendi')
+      } else if (noteModal === 'revize') {
+        if (!noteText.trim()) { message.warning('Revizyon notu zorunludur'); setNoteModal('revize'); return }
+        const r = await api.post(`/samples/${id}/revize`, { note: noteText })
+        setSample(r.data)
+        message.warning('Revizyon talep edildi')
+      } else if (noteModal === 'reject') {
+        const r = await api.post(`/samples/${id}/cancel`, { note: noteText || undefined })
+        setSample(r.data)
+        message.warning('Talep iptal edildi')
       }
-      const r = await api.post(`/samples/${id}/advance`, payload)
-      setSample(r.data)
-      if (r.data.warnings?.length) {
-        r.data.warnings.forEach((w) => message.warning(w, 8))
-      }
-      message.success('Aşama güncellendi')
     } catch (e) {
       message.error(e?.response?.data?.detail || 'Hata oluştu')
     } finally {
       setAdvancing(false)
-      setNoteModal(null)
-      setNoteText('')
-      setTrackingNo('')
-    }
-  }
-
-  const handleRevize = async () => {
-    setRevizing(true)
-    try {
-      const r = await api.post(`/samples/${id}/revize`, { note: noteText || null })
-      setSample(r.data)
-      message.success('Revizyon için geri gönderildi')
-    } catch (e) {
-      message.error(e?.response?.data?.detail || 'Hata oluştu')
-    } finally {
-      setRevizing(false)
-      setNoteModal(null)
-      setNoteText('')
-    }
-  }
-
-  const handleCancel = async () => {
-    try {
-      const r = await api.post(`/samples/${id}/cancel`)
-      setSample(r.data)
-      message.success('Talep iptal edildi')
-    } catch (e) {
-      message.error(e?.response?.data?.detail || 'Hata oluştu')
     }
   }
 
@@ -190,250 +166,343 @@ export default function SampleDetailPage() {
 
   const itemColumns = [
     { title: 'Ürün', dataIndex: 'product_name', key: 'product_name' },
-    { title: 'Adet', dataIndex: 'quantity', key: 'quantity' },
-    { title: 'Raf', dataIndex: 'shelf', key: 'shelf', render: (v) => v || '-' },
+    { title: 'Adet', dataIndex: 'quantity', key: 'quantity', width: 80 },
+    { title: 'Raf', dataIndex: 'shelf', key: 'shelf', width: 120, render: (v) => v || '-' },
   ]
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
+  if (loading) return <Spin size="large" style={{ display: 'block', margin: '80px auto' }} />
   if (!sample) return <div>Talep bulunamadı.</div>
 
   const shipped = sample.stage === 'shipped'
   const cancelled = sample.stage === 'iptal_edildi'
+  const isPreparingStage = sample.stage === 'preparing' && user?.role === 'warehouse'
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/samples')}>Geri</Button>
-        <Title level={4} style={{ margin: 0 }}>
-          Numune Talebi #{sample.id} — <Tag color={STAGE_COLORS[sample.stage]}>{STAGE_LABELS[sample.stage]}</Tag>
-        </Title>
-      </div>
+      <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/samples')} style={{ marginBottom: 16 }}>
+        Geri
+      </Button>
 
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {/* Left column */}
-        <div style={{ flex: 2, minWidth: 400 }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Ana Bilgiler */}
           <Card
-            title="Talep Bilgileri"
-            size="small"
-            style={{ marginBottom: 16 }}
+            title={
+              <Space>
+                <span>Numune Talebi #{sample.id}</span>
+                <Tag color={STAGE_COLORS[sample.stage]}>{STAGE_LABELS[sample.stage] || sample.stage}</Tag>
+              </Space>
+            }
             extra={
               !shipped && !cancelled && (
                 <Button size="small" icon={<EditOutlined />} onClick={openEdit}>Düzenle</Button>
               )
             }
           >
-            <Descriptions size="small" column={2} bordered>
+            <Descriptions column={2} bordered size="small">
               <Descriptions.Item label="Müşteri">{sample.customer_name}</Descriptions.Item>
               <Descriptions.Item label="TG Fırsatı">{sample.tg_opportunity_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Sevk Şekli">{sample.delivery_type || '-'}</Descriptions.Item>
               <Descriptions.Item label="Kargo Firması">{sample.cargo_company || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Teslim Adresi" span={2}>{sample.delivery_address || '-'}</Descriptions.Item>
-              <Descriptions.Item label="İlçe">{sample.delivery_district || '-'}</Descriptions.Item>
-              <Descriptions.Item label="İl">{sample.delivery_city || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Alıcı">{sample.recipient_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Alıcı Tel">{sample.recipient_phone || '-'}</Descriptions.Item>
               <Descriptions.Item label="Planlanan Tarih">{sample.planned_ship_date || '-'}</Descriptions.Item>
               <Descriptions.Item label="Takip No">{sample.cargo_tracking_no || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Notlar" span={2}>{sample.notes || '-'}</Descriptions.Item>
-              <Descriptions.Item label="İrsaliye Notu" span={2}>{sample.waybill_note || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Alıcı">{sample.recipient_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Alıcı Tel">{sample.recipient_phone || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Teslimat Adresi" span={2}>
+                {[sample.delivery_address, sample.delivery_district, sample.delivery_city, sample.delivery_zip]
+                  .filter(Boolean).join(', ') || '-'}
+              </Descriptions.Item>
               <Descriptions.Item label="Oluşturan">{sample.created_by?.name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Tarih">{sample.created_at?.slice(0, 10)}</Descriptions.Item>
-            </Descriptions>
-          </Card>
-
-          <Card title="Ürünler" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={sample.items || []}
-              columns={itemColumns}
-              rowKey={(r, i) => i}
-              size="small"
-              pagination={false}
-            />
-          </Card>
-
-          {/* İrsaliye */}
-          <Card title="İrsaliye" size="small" style={{ marginBottom: 16 }}>
-            {sample.irsaliye_id ? (
-              irsaliye ? (
-                <Descriptions size="small" column={1}>
-                  <Descriptions.Item label="İrsaliye No">{irsaliye.irsaliye_no || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Tarih">{irsaliye.issue_date || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Cari">{irsaliye.contact_name || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="Paraşüt">
-                    <a href={irsaliye.url} target="_blank" rel="noreferrer">Paraşüt'te Aç</a>
-                  </Descriptions.Item>
-                </Descriptions>
-              ) : (
-                <Spin size="small" />
-              )
-            ) : (
-              <Text type="secondary">İrsaliye henüz oluşturulmadı.</Text>
-            )}
-          </Card>
-
-          {/* Photos */}
-          {(sample.cargo_photo_urls?.length > 0 || sample.stage === 'preparing') && (
-            <Card title="Kargo Fotoğrafları" size="small" style={{ marginBottom: 16 }}>
-              <Space wrap>
-                {(sample.cargo_photo_urls || []).map((url, i) => (
-                  <Image key={i} src={url} width={80} height={80} style={{ objectFit: 'cover', borderRadius: 4 }} />
-                ))}
-              </Space>
-              {sample.stage === 'preparing' && (
-                <Upload customRequest={handlePhotoUpload} showUploadList={false} accept="image/*">
-                  <Button icon={<UploadOutlined />} loading={uploadingPhotos} style={{ marginTop: 8 }}>Fotoğraf Ekle</Button>
-                </Upload>
+              <Descriptions.Item label="Tarih">{sample.created_at?.slice(0, 10) || '-'}</Descriptions.Item>
+              {sample.notes && (
+                <Descriptions.Item label="Notlar" span={2}>{sample.notes}</Descriptions.Item>
               )}
-            </Card>
-          )}
-        </div>
+              {sample.waybill_note && (
+                <Descriptions.Item label="İrsaliye Notu" span={2}>{sample.waybill_note}</Descriptions.Item>
+              )}
+            </Descriptions>
 
-        {/* Right column */}
-        <div style={{ flex: 1, minWidth: 260 }}>
-          {/* Actions */}
-          {!shipped && !cancelled && (
-            <Card title="Aksiyonlar" size="small" style={{ marginBottom: 16 }}>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                {canAdvance() && (
-                  <Button
-                    type="primary"
-                    icon={<CheckOutlined />}
-                    block
-                    onClick={() => setNoteModal('advance')}
-                  >
+            {sample.items?.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <Text strong>Ürünler</Text>
+                <Table
+                  dataSource={sample.items}
+                  columns={itemColumns}
+                  rowKey={(_, i) => i}
+                  pagination={false}
+                  size="small"
+                  style={{ marginTop: 8 }}
+                />
+              </div>
+            )}
+
+            {/* Sevke hazırlık: fotoğraf yükleme */}
+            {isPreparingStage && (
+              <div style={{ marginTop: 20 }}>
+                <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 8, padding: 16 }}>
+                  <Text strong style={{ display: 'block', marginBottom: 12 }}>Kargo Fotoğrafları</Text>
+                  <Space wrap>
+                    {(sample.cargo_photo_urls || []).map((url, i) => (
+                      <Image key={i} src={url} width={72} height={72} style={{ objectFit: 'cover', borderRadius: 4 }} />
+                    ))}
+                    <Upload customRequest={handlePhotoUpload} showUploadList={false} accept="image/*" multiple>
+                      <Button icon={<UploadOutlined />} loading={uploadingPhotos} size="small">Fotoğraf Ekle</Button>
+                    </Upload>
+                  </Space>
+                </div>
+              </div>
+            )}
+
+            {/* Revizyon notu banner */}
+            {sample.stage === 'revizyon_bekleniyor' && sample.revision_note && (
+              <div style={{ marginTop: 16, padding: '10px 16px', background: '#fff2e8', border: '1px solid #ffbb96', borderRadius: 6 }}>
+                <Text strong style={{ color: '#d4380d', fontSize: 12 }}>Revizyon Notu</Text>
+                <div style={{ marginTop: 4, color: '#333' }}>{sample.revision_note}</div>
+              </div>
+            )}
+
+            {/* İptal banner */}
+            {cancelled && (
+              <div style={{ marginTop: 16, padding: '10px 16px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 6 }}>
+                <Text strong style={{ color: '#595959' }}>Bu numune talebi iptal edilmiştir.</Text>
+              </div>
+            )}
+
+            {/* Aksiyon butonları */}
+            {(canAdvance || canRequestRevision || canReject) && (
+              <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {canAdvance && (
+                  <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
                     {ADVANCE_LABELS[sample.stage]}
                   </Button>
                 )}
-                {sample.stage === 'pending_admin' && user?.role === 'admin' && (
+                {canRequestRevision && (
                   <Button
-                    danger
-                    block
-                    onClick={() => setNoteModal('revize')}
+                    icon={<RollbackOutlined />}
+                    onClick={() => openNoteModal('revize')}
+                    loading={advancing}
+                    style={{ borderColor: '#fa8c16', color: '#fa8c16' }}
                   >
-                    Revizyon İste
+                    Revizyon Talep Et
                   </Button>
                 )}
-                {canCancel() && (
-                  <Popconfirm title="Bu talebi iptal etmek istediğinize emin misiniz?" onConfirm={handleCancel} okText="Evet" cancelText="Hayır">
-                    <Button danger icon={<CloseOutlined />} block>İptal Et</Button>
-                  </Popconfirm>
+                {canReject && (
+                  <Button danger icon={<CloseOutlined />} onClick={() => openNoteModal('reject')} loading={advancing}>
+                    İptal Et
+                  </Button>
                 )}
-              </Space>
+              </div>
+            )}
+
+            <Modal
+              title={
+                noteModal === 'reject' ? 'İptal Et — Not Ekle'
+                : noteModal === 'revize' ? 'Revizyon Talep Et'
+                : `${ADVANCE_LABELS[sample?.stage] || 'Onayla'} — Not Ekle`
+              }
+              open={!!noteModal}
+              onOk={submitWithNote}
+              onCancel={() => setNoteModal(null)}
+              okText={noteModal === 'reject' ? 'İptal Et' : noteModal === 'revize' ? 'Revizyon Talep Et' : 'Onayla'}
+              okButtonProps={{
+                danger: noteModal === 'reject',
+                style: noteModal === 'revize' ? { background: '#fa8c16', borderColor: '#fa8c16' } : undefined,
+              }}
+              cancelText="Vazgeç"
+              confirmLoading={advancing}
+            >
+              {noteModal === 'advance' && sample?.stage === 'preparing' && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>Kargo Takip No</label>
+                  <Input
+                    placeholder="Takip numarası (opsiyonel)"
+                    value={trackingNo}
+                    onChange={(e) => setTrackingNo(e.target.value)}
+                  />
+                </div>
+              )}
+              <TextArea
+                rows={3}
+                placeholder={(() => {
+                  if (noteModal === 'reject') return 'İsteğe bağlı not (satış personeline görünür)'
+                  if (noteModal === 'revize') return 'Revizyon açıklaması (zorunlu) — satış personeline gönderilir'
+                  if (sample?.stage === 'pending_admin') return 'İsteğe bağlı not (sevk sorumlusuna görünür)'
+                  return 'İsteğe bağlı not'
+                })()}
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                autoFocus
+              />
+            </Modal>
+          </Card>
+
+          {/* İrsaliye */}
+          {sample.irsaliye_id && (
+            <Card title="İrsaliye (Paraşüt)" size="small">
+              {irsaliye ? (
+                <Descriptions column={2} size="small">
+                  {irsaliye.contact_name && (
+                    <Descriptions.Item label="Müşteri" span={2}>{irsaliye.contact_name}</Descriptions.Item>
+                  )}
+                  <Descriptions.Item label="İrsaliye No">
+                    {irsaliye.irsaliye_no
+                      ? irsaliye.irsaliye_no
+                      : <Tag color="orange">Onay Bekleniyor</Tag>}
+                  </Descriptions.Item>
+                  {irsaliye.issue_date && (
+                    <Descriptions.Item label="Düzenleme Tarihi">{irsaliye.issue_date}</Descriptions.Item>
+                  )}
+                  {irsaliye.description && (
+                    <Descriptions.Item label="Açıklama" span={2}>{irsaliye.description}</Descriptions.Item>
+                  )}
+                </Descriptions>
+              ) : (
+                <Spin size="small" />
+              )}
+              {irsaliye?.url && (
+                <div style={{ marginTop: 12 }}>
+                  <Button icon={<SendOutlined />} size="small" href={irsaliye.url} target="_blank" rel="noreferrer">
+                    Paraşüt'te Görüntüle
+                  </Button>
+                </div>
+              )}
             </Card>
           )}
 
-          {/* History */}
+          {/* Sevk fotoğrafları (shipped aşamasında) */}
+          {shipped && sample.cargo_photo_urls?.length > 0 && (
+            <Card title="Sevk Fotoğrafları" size="small">
+              <Image.PreviewGroup>
+                <Space wrap>
+                  {sample.cargo_photo_urls.map((url, i) => (
+                    <Image key={i} src={url} width={80} height={80} style={{ objectFit: 'cover', borderRadius: 4 }} />
+                  ))}
+                </Space>
+              </Image.PreviewGroup>
+            </Card>
+          )}
+
+        </div>
+
+        {/* Geçmiş */}
+        <div style={{ width: 280 }}>
           <Card title="Geçmiş" size="small">
-            {sample.history?.length === 0 && <Text type="secondary">Henüz geçmiş yok.</Text>}
             <Timeline
-              items={(sample.history || []).map((h) => ({
-                color: h.stage_to === 'shipped' ? 'green' : h.stage_to === 'iptal_edildi' ? 'red' : 'blue',
-                children: (
-                  <div>
-                    <div style={{ fontSize: 12, color: '#666' }}>{h.created_at?.slice(0, 16).replace('T', ' ')}</div>
-                    <div style={{ fontSize: 13 }}>
-                      {h.stage_from
-                        ? <><Tag style={{ fontSize: 11 }}>{STAGE_LABELS[h.stage_from] || h.stage_from}</Tag> → <Tag color={STAGE_COLORS[h.stage_to]} style={{ fontSize: 11 }}>{STAGE_LABELS[h.stage_to] || h.stage_to}</Tag></>
-                        : <Tag color={STAGE_COLORS[h.stage_to]} style={{ fontSize: 11 }}>{STAGE_LABELS[h.stage_to] || h.stage_to}</Tag>
+              items={(sample.history || []).map((h) => {
+                const isCreated = h.note?.startsWith('[CREATED]')
+                const isRejected = h.note?.startsWith('[IPTAL]')
+                const isRevision = h.note?.startsWith('[REVIZYON]')
+                const cleanNote = (h.note || '')
+                  .replace('[CREATED]', '').replace('[IPTAL]', '').replace('[REVIZYON]', '').trim()
+                const localTime = h.created_at
+                  ? new Date(h.created_at + (h.created_at.endsWith('Z') ? '' : 'Z'))
+                      .toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })
+                  : ''
+                return {
+                  color: isCreated ? 'green' : isRejected ? 'red' : isRevision ? 'orange' : 'blue',
+                  children: (
+                    <div>
+                      <Text strong style={{ fontSize: 12 }}>{h.user?.name || h.user || '-'}</Text>
+                      <br />
+                      {isCreated
+                        ? <Text type="secondary" style={{ fontSize: 11 }}>Numune talebi oluşturuldu</Text>
+                        : <Text type="secondary" style={{ fontSize: 11 }}>
+                            {STAGE_LABELS[h.stage_from] || h.stage_from} → {STAGE_LABELS[h.stage_to] || h.stage_to}
+                          </Text>
                       }
+                      {cleanNote && <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{cleanNote}</div>}
+                      <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>{localTime}</div>
                     </div>
-                    {h.note && <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{h.note}</div>}
-                    {h.user && <div style={{ fontSize: 11, color: '#999' }}>{h.user.name}</div>}
-                  </div>
-                ),
-              }))}
+                  ),
+                }
+              })}
             />
           </Card>
         </div>
       </div>
 
-      {/* Advance modal */}
-      <Modal
-        title={ADVANCE_LABELS[sample.stage]}
-        open={noteModal === 'advance'}
-        onCancel={() => { setNoteModal(null); setNoteText(''); setTrackingNo('') }}
-        onOk={handleAdvance}
-        okText="Onayla"
-        cancelText="Vazgeç"
-        confirmLoading={advancing}
-      >
-        {sample.stage === 'preparing' && (
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>Kargo Takip No</label>
-            <Input
-              placeholder="Takip numarası (opsiyonel)"
-              value={trackingNo}
-              onChange={(e) => setTrackingNo(e.target.value)}
-            />
-          </div>
-        )}
-        <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>Not (opsiyonel)</label>
-        <TextArea rows={3} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Notunuzu buraya yazın..." />
-      </Modal>
-
-      {/* Revize modal */}
-      <Modal
-        title="Revizyon İste"
-        open={noteModal === 'revize'}
-        onCancel={() => { setNoteModal(null); setNoteText('') }}
-        onOk={handleRevize}
-        okText="Geri Gönder"
-        okButtonProps={{ danger: true }}
-        cancelText="Vazgeç"
-        confirmLoading={revizing}
-      >
-        <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>Revizyon Notu</label>
-        <TextArea rows={3} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Ne düzeltilmeli? (opsiyonel)" />
-      </Modal>
-
-      {/* Edit Drawer */}
+      {/* Düzenleme Drawer */}
       <Drawer
         title="Talebi Düzenle"
+        placement="right"
+        width={500}
         open={editDrawerOpen}
         onClose={() => setEditDrawerOpen(false)}
-        width={500}
         footer={
-          <Space style={{ justifyContent: 'flex-end', display: 'flex' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => setEditDrawerOpen(false)}>İptal</Button>
             <Button type="primary" loading={editSubmitting} onClick={handleEditSubmit}>Kaydet</Button>
-          </Space>
+          </div>
         }
       >
-        <Form form={editForm} layout="vertical">
-          <Form.Item label="Sevk Şekli" name="delivery_type">
-            <Select options={[{ value: 'Ofis Teslim' }, { value: 'Kargo' }]} allowClear />
-          </Form.Item>
-          {editDeliveryType === 'Kargo' && (
-            <Form.Item label="Kargo Firması" name="cargo_company">
-              <Select options={CARGO_COMPANIES.map((c) => ({ value: c }))} allowClear />
-            </Form.Item>
-          )}
-          <Form.Item label="Teslim Adresi" name="delivery_address">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item label="İlçe" name="delivery_district" style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
-            <Form.Item label="İl" name="delivery_city" style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
+        {/* Revizyon notu hatırlatıcı */}
+        {sample?.revision_note && (
+          <div style={{ marginBottom: 20, padding: '10px 16px', background: '#fff2e8', border: '1px solid #ffbb96', borderRadius: 6 }}>
+            <Text strong style={{ color: '#d4380d', fontSize: 12 }}>Revizyon Notu</Text>
+            <div style={{ marginTop: 4, color: '#333', fontSize: 13 }}>{sample.revision_note}</div>
           </div>
-          <Form.Item label="Alıcı Adı" name="recipient_name">
-            <Input />
-          </Form.Item>
-          <Form.Item label="Alıcı Telefon" name="recipient_phone">
-            <Input />
-          </Form.Item>
-          <Form.Item label="Planlanan Sevk Tarihi" name="planned_ship_date">
-            <DatePicker style={{ width: '100%' }} format="DD.MM.YYYY" />
-          </Form.Item>
+        )}
+
+        <Form form={editForm} layout="vertical">
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Sevk Şekli" name="delivery_type">
+                <Select options={[{ value: 'Kargo', label: 'Kargo' }, { value: 'Ofis Teslim', label: 'Ofis Teslim' }]} allowClear />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Planlanan Sevk Tarihi" name="planned_ship_date">
+                <DatePicker style={{ width: '100%' }} format="DD.MM.YYYY" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {editDeliveryType === 'Kargo' && (
+            <>
+              <Form.Item label="Kargo Firması" name="cargo_company">
+                <Select options={CARGO_COMPANIES.map((c) => ({ value: c, label: c }))} allowClear />
+              </Form.Item>
+              <Form.Item label="Teslimat Adresi" name="delivery_address">
+                <Input.TextArea rows={2} placeholder="Cadde, sokak, no, daire..." />
+              </Form.Item>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="İlçe" name="delivery_district">
+                    <Input placeholder="Kadıköy" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="İl" name="delivery_city">
+                    <Input placeholder="İstanbul" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item label="Posta Kodu" name="delivery_zip">
+                <Input placeholder="34710" maxLength={5} style={{ width: 120 }} />
+              </Form.Item>
+              <Row gutter={12}>
+                <Col span={14}>
+                  <Form.Item label="Alıcı Adı" name="recipient_name">
+                    <Input placeholder="Teslim alacak kişi" />
+                  </Form.Item>
+                </Col>
+                <Col span={10}>
+                  <Form.Item label="Alıcı Telefonu" name="recipient_phone">
+                    <Input placeholder="05xx..." />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )}
+
           <Form.Item label="Notlar" name="notes">
-            <Input.TextArea rows={2} />
+            <Input.TextArea rows={2} placeholder="İsteğe bağlı..." />
           </Form.Item>
           <Form.Item label="İrsaliye Notu" name="waybill_note">
-            <Input.TextArea rows={2} />
+            <Input.TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
           </Form.Item>
+
           <Form.List name="items">
             {(fields, { add, remove }) => (
               <>
@@ -453,7 +522,9 @@ export default function SampleDetailPage() {
                     <Button type="text" danger icon={<CloseOutlined />} onClick={() => remove(name)} />
                   </Space>
                 ))}
-                <Button type="dashed" onClick={() => add({ product_name: '', quantity: 1, shelf: '', product_id: null })} block>+ Ürün Ekle</Button>
+                <Button type="dashed" onClick={() => add({ product_name: '', quantity: 1, shelf: '', product_id: null })} block>
+                  + Ürün Ekle
+                </Button>
               </>
             )}
           </Form.List>

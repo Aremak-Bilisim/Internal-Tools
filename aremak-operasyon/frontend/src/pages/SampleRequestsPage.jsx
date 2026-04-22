@@ -195,7 +195,7 @@ export default function SampleRequestsPage() {
       const opp = opportunities.find((o) => o.Id === values.tg_opportunity_id)
       const payload = {
         ...values,
-        tg_opportunity_name: opp?.Title || opp?.RelatedEntityName || '',
+        tg_opportunity_name: opp?.Displayname || opp?.Name || opp?.Title || '',
         planned_ship_date: values.planned_ship_date ? dayjs(values.planned_ship_date).format('YYYY-MM-DD') : null,
       }
       await api.post('/samples', payload)
