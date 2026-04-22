@@ -336,22 +336,24 @@ async def get_irsaliye_line_items(irsaliye_id: str) -> list:
         r = await client.get(
             f"{BASE}/v4/{COMPANY}/shipment_documents/{irsaliye_id}",
             headers={"Authorization": f"Bearer {token}"},
-            params={"include": "details,details.product"},
+            params={"include": "stock_movements,stock_movements.product"},
         )
         if not r.is_success:
             return []
         data = r.json()
 
     included = {f"{i['type']}/{i['id']}": i for i in data.get("included", [])}
-    details_rel = data["data"].get("relationships", {}).get("details", {}).get("data", [])
+    movements_rel = data["data"].get("relationships", {}).get("stock_movements", {}).get("data", [])
 
     items = []
-    for d_ref in details_rel:
-        detail = included.get(f"{d_ref['type']}/{d_ref['id']}", {})
-        d_attrs = detail.get("attributes", {})
-        product_name = d_attrs.get("description", "")
+    for m_ref in movements_rel:
+        movement = included.get(f"{m_ref['type']}/{m_ref['id']}", {})
+        m_attrs = movement.get("attributes", {})
+        if m_attrs.get("inflow"):
+            continue  # yalnızca çıkış hareketleri
+        product_name = m_attrs.get("description", "")
         product_code = ""
-        prod_rel = detail.get("relationships", {}).get("product", {}).get("data")
+        prod_rel = movement.get("relationships", {}).get("product", {}).get("data")
         if prod_rel:
             prod = included.get(f"{prod_rel['type']}/{prod_rel['id']}", {})
             p_attrs = prod.get("attributes", {})
@@ -360,7 +362,7 @@ async def get_irsaliye_line_items(irsaliye_id: str) -> list:
         items.append({
             "product_name": product_name,
             "product_code": product_code,
-            "quantity": float(d_attrs.get("quantity") or 0),
+            "quantity": abs(float(m_attrs.get("quantity") or 0)),
         })
     return items
 
