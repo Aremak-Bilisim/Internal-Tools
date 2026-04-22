@@ -333,14 +333,11 @@ async def get_metadata() -> dict:
 
 async def get_proposals_for_opportunity(opportunity_id: int) -> dict:
     """
-    Bir fırsatın şirketine ait teklifleri çeker (Proposals/Index?ofid=entity_id).
-    Proposals/Index, ofid parametresiyle bir şirkete/nesneye ait teklifleri listeler.
+    Bir fırsata bağlı teklifleri çeker.
+    Proposals/Index?ofid=opportunity_id ile fırsat ID'si geçilince
+    yalnızca o fırsata ait teklifler gelir.
     """
-    opp = await get_opportunity(opportunity_id)
-    entity_id = (opp.get("RelatedEntity") or {}).get("Id")
-    if not entity_id:
-        return {"List": []}
-    data = await _get(f"{DOMAIN}/Proposals/Index", {"ofid": entity_id, "page": 1, "pagesize": 50})
+    data = await _get(f"{DOMAIN}/Proposals/Index", {"ofid": opportunity_id, "page": 1, "pagesize": 50})
     return {"List": data.get("List") or []}
 
 
