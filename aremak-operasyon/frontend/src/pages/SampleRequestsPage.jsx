@@ -12,6 +12,7 @@ const STAGE_COLORS = {
   pending_admin: 'orange',
   preparing: 'cyan',
   shipped: 'green',
+  revizyon_bekleniyor: 'volcano',
   iptal_edildi: 'default',
 }
 
@@ -19,22 +20,25 @@ const STAGE_LABELS = {
   pending_admin: 'Yönetici Onayı Bekleniyor',
   preparing: 'Sevk İçin Hazırlanıyor',
   shipped: 'Sevk Edildi',
+  revizyon_bekleniyor: 'Revizyon Bekleniyor',
   iptal_edildi: 'İptal Edildi',
 }
 
 const STAGE_ACTOR = {
   pending_admin: 'admin',
   preparing: 'warehouse',
+  revizyon_bekleniyor: 'sales',
 }
 
 const MY_STAGES = {
   admin: ['pending_admin'],
   warehouse: ['preparing'],
-  sales: [],
+  sales: ['revizyon_bekleniyor'],
 }
 
 const STAGES = [
   { key: 'all', label: 'Tümü' },
+  { key: 'revizyon_bekleniyor', label: 'Revizyon Bekleniyor' },
   { key: 'pending_admin', label: 'Yönetici Onayı Bekleniyor' },
   { key: 'preparing', label: 'Sevke Hazırlanıyor' },
   { key: 'shipped', label: 'Sevk Edildi' },

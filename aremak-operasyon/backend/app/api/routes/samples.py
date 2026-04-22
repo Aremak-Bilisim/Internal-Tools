@@ -20,15 +20,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 STAGE_TRANSITIONS = {
-    "pending_admin": {"next": "preparing", "roles": ["admin"]},
-    "preparing":     {"next": "shipped",   "roles": ["warehouse"]},
+    "pending_admin":       {"next": "preparing",       "roles": ["admin"]},
+    "preparing":           {"next": "shipped",          "roles": ["warehouse"]},
+    "revizyon_bekleniyor": {"next": "pending_admin",    "roles": ["sales", "admin"]},
 }
 
 STAGE_LABELS = {
-    "pending_admin": "Yönetici Onayı Bekleniyor",
-    "preparing":     "Sevk İçin Hazırlanıyor",
-    "shipped":       "Sevk Edildi",
-    "iptal_edildi":  "İptal Edildi",
+    "pending_admin":       "Yönetici Onayı Bekleniyor",
+    "preparing":           "Sevk İçin Hazırlanıyor",
+    "shipped":             "Sevk Edildi",
+    "revizyon_bekleniyor": "Revizyon Bekleniyor",
+    "iptal_edildi":        "İptal Edildi",
 }
 
 
@@ -278,6 +280,9 @@ async def advance_stage(
         notify_roles = ["warehouse"]
     elif new_stage == "shipped":
         notify_roles = ["sales", "admin"]
+    elif new_stage == "pending_admin":
+        # Sales re-submitted after revision — notify admins
+        notify_roles = ["admin"]
 
     notif_users = db.query(User).filter(
         User.role.in_(notify_roles), User.is_active == True
@@ -298,6 +303,52 @@ async def advance_stage(
     result = _sample_to_dict(s)
     result["warnings"] = warnings
     return result
+
+
+class RevizeBody(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/{sample_id}/revize")
+def request_revision(
+    sample_id: int,
+    body: RevizeBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin")),
+):
+    """Admin sends the request back to sales for revision (pending_admin → revizyon_bekleniyor)."""
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+    if s.stage != "pending_admin":
+        raise HTTPException(400, "Yalnızca yönetici onayı aşamasında revizyon istenebilir")
+
+    old_stage = s.stage
+    s.stage = "revizyon_bekleniyor"
+
+    history = SampleHistory(
+        sample_id=s.id,
+        stage_from=old_stage,
+        stage_to="revizyon_bekleniyor",
+        note=body.note,
+        user_id=current_user.id,
+    )
+    db.add(history)
+
+    # Notify the creator (sales)
+    if s.created_by_id:
+        notif = Notification(
+            user_id=s.created_by_id,
+            title="Numune: Revizyon Bekleniyor",
+            message=f"{s.customer_name} numune talebi revizyon için geri gönderildi."
+            + (f" Not: {body.note}" if body.note else ""),
+            sample_id=s.id,
+        )
+        db.add(notif)
+
+    db.commit()
+    db.refresh(s)
+    return _sample_to_dict(s)
 
 
 @router.post("/{sample_id}/cancel")

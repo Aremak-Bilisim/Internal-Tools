@@ -13,6 +13,7 @@ const STAGE_COLORS = {
   pending_admin: 'orange',
   preparing: 'cyan',
   shipped: 'green',
+  revizyon_bekleniyor: 'volcano',
   iptal_edildi: 'default',
 }
 
@@ -20,17 +21,20 @@ const STAGE_LABELS = {
   pending_admin: 'Yönetici Onayı Bekleniyor',
   preparing: 'Sevk İçin Hazırlanıyor',
   shipped: 'Sevk Edildi',
+  revizyon_bekleniyor: 'Revizyon Bekleniyor',
   iptal_edildi: 'İptal Edildi',
 }
 
 const ADVANCE_LABELS = {
   pending_admin: 'Onayla (Sevk Sorumlusuna Gönder)',
   preparing: 'Sevk Edildi Olarak İşaretle',
+  revizyon_bekleniyor: 'Düzelttim, Tekrar Gönder',
 }
 
 const STAGE_ROLES = {
   pending_admin: ['admin'],
   preparing: ['warehouse'],
+  revizyon_bekleniyor: ['sales', 'admin'],
 }
 
 const CARGO_COMPANIES = ['Yurtiçi Kargo', 'Aras Kargo', 'MNG Kargo', 'PTT Kargo', 'Sürat Kargo', 'DHL', 'UPS']
@@ -42,9 +46,10 @@ export default function SampleDetailPage() {
   const [sample, setSample] = useState(null)
   const [loading, setLoading] = useState(true)
   const [advancing, setAdvancing] = useState(false)
-  const [noteModal, setNoteModal] = useState(null)
+  const [noteModal, setNoteModal] = useState(null)  // 'advance' | 'revize' | null
   const [noteText, setNoteText] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
+  const [revizing, setRevizing] = useState(false)
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
   const [editDrawerOpen, setEditDrawerOpen] = useState(false)
   const [editForm] = Form.useForm()
@@ -94,6 +99,21 @@ export default function SampleDetailPage() {
       setNoteModal(null)
       setNoteText('')
       setTrackingNo('')
+    }
+  }
+
+  const handleRevize = async () => {
+    setRevizing(true)
+    try {
+      const r = await api.post(`/samples/${id}/revize`, { note: noteText || null })
+      setSample(r.data)
+      message.success('Revizyon için geri gönderildi')
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Hata oluştu')
+    } finally {
+      setRevizing(false)
+      setNoteModal(null)
+      setNoteText('')
     }
   }
 
@@ -256,6 +276,15 @@ export default function SampleDetailPage() {
                     {ADVANCE_LABELS[sample.stage]}
                   </Button>
                 )}
+                {sample.stage === 'pending_admin' && user?.role === 'admin' && (
+                  <Button
+                    danger
+                    block
+                    onClick={() => setNoteModal('revize')}
+                  >
+                    Revizyon İste
+                  </Button>
+                )}
                 {canCancel() && (
                   <Popconfirm title="Bu talebi iptal etmek istediğinize emin misiniz?" onConfirm={handleCancel} okText="Evet" cancelText="Hayır">
                     <Button danger icon={<CloseOutlined />} block>İptal Et</Button>
@@ -312,6 +341,21 @@ export default function SampleDetailPage() {
         )}
         <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>Not (opsiyonel)</label>
         <TextArea rows={3} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Notunuzu buraya yazın..." />
+      </Modal>
+
+      {/* Revize modal */}
+      <Modal
+        title="Revizyon İste"
+        open={noteModal === 'revize'}
+        onCancel={() => { setNoteModal(null); setNoteText('') }}
+        onOk={handleRevize}
+        okText="Geri Gönder"
+        okButtonProps={{ danger: true }}
+        cancelText="Vazgeç"
+        confirmLoading={revizing}
+      >
+        <label style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>Revizyon Notu</label>
+        <TextArea rows={3} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Ne düzeltilmeli? (opsiyonel)" />
       </Modal>
 
       {/* Edit Drawer */}
