@@ -1,0 +1,354 @@
+import logging
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from sqlalchemy.orm import Session
+from typing import Optional
+from pydantic import BaseModel
+from app.core.database import get_db
+from app.core.auth import get_current_user, require_role
+from app.models.sample import SampleRequest, SampleHistory
+from app.models.user import User
+from app.models.notification import Notification
+from app.services import teamgram
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+STAGE_TRANSITIONS = {
+    "pending_admin": {"next": "preparing", "roles": ["admin"]},
+    "preparing":     {"next": "shipped",   "roles": ["warehouse"]},
+}
+
+STAGE_LABELS = {
+    "pending_admin": "Yönetici Onayı Bekleniyor",
+    "preparing":     "Sevk İçin Hazırlanıyor",
+    "shipped":       "Sevk Edildi",
+    "iptal_edildi":  "İptal Edildi",
+}
+
+
+class SampleCreate(BaseModel):
+    tg_opportunity_id: Optional[int] = None
+    tg_opportunity_name: Optional[str] = None
+    customer_name: str
+    delivery_type: Optional[str] = None
+    cargo_company: Optional[str] = None
+    delivery_address: Optional[str] = None
+    delivery_district: Optional[str] = None
+    delivery_city: Optional[str] = None
+    delivery_zip: Optional[str] = None
+    notes: Optional[str] = None
+    waybill_note: Optional[str] = None
+    recipient_name: Optional[str] = None
+    recipient_phone: Optional[str] = None
+    planned_ship_date: Optional[str] = None
+    items: list = []
+    assigned_to_id: Optional[int] = None
+
+
+class SampleUpdate(BaseModel):
+    delivery_type: Optional[str] = None
+    cargo_company: Optional[str] = None
+    delivery_address: Optional[str] = None
+    delivery_district: Optional[str] = None
+    delivery_city: Optional[str] = None
+    delivery_zip: Optional[str] = None
+    notes: Optional[str] = None
+    waybill_note: Optional[str] = None
+    recipient_name: Optional[str] = None
+    recipient_phone: Optional[str] = None
+    planned_ship_date: Optional[str] = None
+    items: Optional[list] = None
+    assigned_to_id: Optional[int] = None
+
+
+class StageAdvance(BaseModel):
+    note: Optional[str] = None
+    cargo_tracking_no: Optional[str] = None
+    cargo_photo_urls: Optional[list] = None
+
+
+def _sample_to_dict(s: SampleRequest) -> dict:
+    return {
+        "id": s.id,
+        "tg_opportunity_id": s.tg_opportunity_id,
+        "tg_opportunity_name": s.tg_opportunity_name,
+        "customer_name": s.customer_name,
+        "delivery_type": s.delivery_type,
+        "cargo_company": s.cargo_company,
+        "delivery_address": s.delivery_address,
+        "delivery_district": s.delivery_district,
+        "delivery_city": s.delivery_city,
+        "delivery_zip": s.delivery_zip,
+        "notes": s.notes,
+        "waybill_note": s.waybill_note,
+        "recipient_name": s.recipient_name,
+        "recipient_phone": s.recipient_phone,
+        "planned_ship_date": s.planned_ship_date,
+        "items": s.items or [],
+        "stage": s.stage,
+        "stage_label": STAGE_LABELS.get(s.stage, s.stage),
+        "irsaliye_id": s.irsaliye_id,
+        "created_by": {"id": s.created_by.id, "name": s.created_by.name} if s.created_by else None,
+        "assigned_to": {"id": s.assigned_to.id, "name": s.assigned_to.name} if s.assigned_to else None,
+        "cargo_photo_urls": s.cargo_photo_urls or [],
+        "cargo_pdf_url": s.cargo_pdf_url,
+        "cargo_tracking_no": s.cargo_tracking_no,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+        "history": [
+            {
+                "id": h.id,
+                "stage_from": h.stage_from,
+                "stage_to": h.stage_to,
+                "note": h.note,
+                "user": {"id": h.user.id, "name": h.user.name} if h.user else None,
+                "created_at": h.created_at.isoformat() if h.created_at else None,
+            }
+            for h in (s.history or [])
+        ],
+    }
+
+
+# ── Opportunities proxy ───────────────────────────────────────────────────────
+
+@router.get("/opportunities")
+async def list_opportunities(current_user=Depends(get_current_user)):
+    return await teamgram.get_opportunities()
+
+
+@router.get("/opportunities/{opp_id}")
+async def get_opportunity(opp_id: int, current_user=Depends(get_current_user)):
+    return await teamgram.get_opportunity(opp_id)
+
+
+# ── Sample CRUD ───────────────────────────────────────────────────────────────
+
+@router.get("")
+def list_samples(
+    stage: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    q = db.query(SampleRequest)
+    if stage:
+        q = q.filter(SampleRequest.stage == stage)
+    if current_user.role == "sales":
+        q = q.filter(SampleRequest.created_by_id == current_user.id)
+    samples = q.order_by(SampleRequest.created_at.desc()).all()
+    return [_sample_to_dict(s) for s in samples]
+
+
+@router.post("")
+def create_sample(
+    data: SampleCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    s = SampleRequest(
+        tg_opportunity_id=data.tg_opportunity_id,
+        tg_opportunity_name=data.tg_opportunity_name,
+        customer_name=data.customer_name,
+        delivery_type=data.delivery_type,
+        cargo_company=data.cargo_company,
+        delivery_address=data.delivery_address,
+        delivery_district=data.delivery_district,
+        delivery_city=data.delivery_city,
+        delivery_zip=data.delivery_zip,
+        notes=data.notes,
+        waybill_note=data.waybill_note,
+        recipient_name=data.recipient_name,
+        recipient_phone=data.recipient_phone,
+        planned_ship_date=data.planned_ship_date,
+        items=data.items,
+        assigned_to_id=data.assigned_to_id,
+        created_by_id=current_user.id,
+        stage="pending_admin",
+    )
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+
+    history = SampleHistory(
+        sample_id=s.id,
+        stage_from=None,
+        stage_to="pending_admin",
+        note=f"[CREATED] {data.notes or ''}".strip(),
+        user_id=current_user.id,
+    )
+    db.add(history)
+
+    # Notify admins
+    admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+    for admin in admins:
+        notif = Notification(
+            user_id=admin.id,
+            title="Yeni Numune Talebi",
+            message=f"{current_user.name} tarafından {s.customer_name} için numune talebi oluşturuldu.",
+            sample_id=s.id,
+        )
+        db.add(notif)
+
+    db.commit()
+    db.refresh(s)
+    return _sample_to_dict(s)
+
+
+@router.get("/{sample_id}")
+def get_sample(sample_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+    return _sample_to_dict(s)
+
+
+@router.patch("/{sample_id}")
+def update_sample(
+    sample_id: int,
+    data: SampleUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+    for field, val in data.model_dump(exclude_unset=True).items():
+        setattr(s, field, val)
+    db.commit()
+    db.refresh(s)
+    return _sample_to_dict(s)
+
+
+@router.post("/{sample_id}/advance")
+async def advance_stage(
+    sample_id: int,
+    body: StageAdvance,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+
+    transition = STAGE_TRANSITIONS.get(s.stage)
+    if not transition:
+        raise HTTPException(400, "Bu aşamadan ilerleme yapılamaz")
+    if current_user.role not in transition["roles"] and current_user.role != "admin":
+        raise HTTPException(403, "Bu işlem için yetkiniz yok")
+
+    old_stage = s.stage
+    new_stage = transition["next"]
+
+    if body.cargo_tracking_no:
+        s.cargo_tracking_no = body.cargo_tracking_no
+    if body.cargo_photo_urls:
+        s.cargo_photo_urls = body.cargo_photo_urls
+
+    s.stage = new_stage
+
+    history = SampleHistory(
+        sample_id=s.id,
+        stage_from=old_stage,
+        stage_to=new_stage,
+        note=body.note,
+        user_id=current_user.id,
+    )
+    db.add(history)
+
+    # On shipped: adjust TG inventory for each item
+    warnings = []
+    if new_stage == "shipped":
+        for item in (s.items or []):
+            product_id = item.get("product_id")
+            quantity = item.get("quantity") or 0
+            if product_id and quantity:
+                try:
+                    await teamgram.inventory_adjustment(product_id, quantity, reason=8)
+                except Exception as e:
+                    warnings.append(f"TG stok güncellenemedi ({item.get('product_name', product_id)}): {e}")
+
+    # Notify relevant users
+    notify_roles = []
+    if new_stage == "preparing":
+        notify_roles = ["warehouse"]
+    elif new_stage == "shipped":
+        notify_roles = ["sales", "admin"]
+
+    notif_users = db.query(User).filter(
+        User.role.in_(notify_roles), User.is_active == True
+    ).all() if notify_roles else []
+
+    for u in notif_users:
+        notif = Notification(
+            user_id=u.id,
+            title=f"Numune: {STAGE_LABELS[new_stage]}",
+            message=f"{s.customer_name} numunesinde yeni aşama: {STAGE_LABELS[new_stage]}",
+            sample_id=s.id,
+        )
+        db.add(notif)
+
+    db.commit()
+    db.refresh(s)
+
+    result = _sample_to_dict(s)
+    result["warnings"] = warnings
+    return result
+
+
+@router.post("/{sample_id}/cancel")
+def cancel_sample(
+    sample_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+    if s.stage == "shipped":
+        raise HTTPException(400, "Sevk edilmiş talep iptal edilemez")
+
+    old_stage = s.stage
+    s.stage = "iptal_edildi"
+    history = SampleHistory(
+        sample_id=s.id,
+        stage_from=old_stage,
+        stage_to="iptal_edildi",
+        note="İptal edildi",
+        user_id=current_user.id,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(s)
+    return _sample_to_dict(s)
+
+
+@router.post("/{sample_id}/photo")
+async def upload_photo(
+    sample_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+
+    ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+    fname = f"sample_{sample_id}_{uuid.uuid4().hex}{ext}"
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    content = await file.read()
+    with open(fpath, "wb") as f:
+        f.write(content)
+
+    url = f"/uploads/{fname}"
+    photos = list(s.cargo_photo_urls or [])
+    photos.append(url)
+    s.cargo_photo_urls = photos
+    db.commit()
+    db.refresh(s)
+    return {"url": url, "cargo_photo_urls": s.cargo_photo_urls}

@@ -15,8 +15,20 @@ logging.basicConfig(
 )
 
 # Tüm modelleri yükle (create_all için)
-from app.models import user, shipment, notification, teamgram_company, product  # noqa
+from app.models import user, shipment, notification, teamgram_company, product, sample  # noqa
 Base.metadata.create_all(bind=engine)
+
+# Column-level migrations for existing tables
+def _run_migrations():
+    from sqlalchemy import text, inspect
+    with engine.connect() as conn:
+        insp = inspect(engine)
+        notif_cols = {c["name"] for c in insp.get_columns("notifications")}
+        if "sample_id" not in notif_cols:
+            conn.execute(text("ALTER TABLE notifications ADD COLUMN sample_id INTEGER REFERENCES sample_requests(id)"))
+            conn.commit()
+
+_run_migrations()
 
 
 @asynccontextmanager

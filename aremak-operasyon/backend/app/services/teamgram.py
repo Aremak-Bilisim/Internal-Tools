@@ -329,3 +329,35 @@ async def get_order_weblink(order_id: int) -> str:
 
 async def get_metadata() -> dict:
     return await _get(f"{DOMAIN}/ScheduledRequests/MetaData")
+
+
+async def get_opportunities(page: int = 1, pagesize: int = 100) -> dict:
+    """Fetch open opportunities filtered to numune pipeline stage."""
+    data = await _get(f"{DOMAIN}/Opportunities/Index", {
+        "page": page,
+        "pagesize": pagesize,
+        "bfilterby_status_openactive": "true",
+    })
+    items = data.get("List") or []
+    filtered = [
+        o for o in items
+        if (o.get("CustomPipelineName") or "").lower() == "inbound"
+        and (o.get("CustomStage") or "") == "Numune/Demo Alım Süreci"
+    ]
+    return {"List": filtered, "Count": len(filtered)}
+
+
+async def get_opportunity(opportunity_id: int) -> dict:
+    return await _get(f"{DOMAIN}/Opportunities/Get", {"id": opportunity_id})
+
+
+async def inventory_adjustment(product_id: int, quantity: float, reason: int = 8) -> dict:
+    """
+    Adjust product inventory. reason=10 → InventoryUsed (for samples sent out).
+    quantity should be positive; the API records it as a decrease for reason=10.
+    """
+    return await _post(f"{DOMAIN}/Products/InventoryAdjustment", {
+        "ProductId": product_id,
+        "Quantity": quantity,
+        "Reason": reason,
+    })

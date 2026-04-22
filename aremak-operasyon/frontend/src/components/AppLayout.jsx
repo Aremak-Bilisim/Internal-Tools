@@ -37,6 +37,7 @@ const menuItems = [
     label: 'Sevkiyatlar',
     children: [
       { key: '/shipments', icon: <SendOutlined />, label: 'Satış Sevkleri' },
+      { key: '/samples', icon: <SendOutlined />, label: 'Giden Numune' },
     ],
   },
   {
@@ -84,7 +85,10 @@ export default function AppLayout() {
         setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n))
       })
     }
-    if (notif.shipment_id) {
+    if (notif.sample_id) {
+      navigate(`/samples/${notif.sample_id}`)
+      setNotifOpen(false)
+    } else if (notif.shipment_id) {
       navigate(`/shipments/${notif.shipment_id}`)
       setNotifOpen(false)
     }
