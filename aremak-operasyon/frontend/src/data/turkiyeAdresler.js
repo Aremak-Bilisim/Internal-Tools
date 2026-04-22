@@ -105,66 +105,56 @@ for (const [il, ilceler] of Object.entries(IL_ILCE)) {
 }
 
 /**
- * Adres stringi içinde il/ilçe ara.
+ * Adresin sonundaki 2 kelimeden il/ilçe çıkarır.
+ * Türk adresi formatı: "... SOKAK/MAH. NO:x, İLÇE, İL" veya "... İLÇE İL"
  * @returns {{ il: string|null, ilce: string|null, street: string }}
  */
 export const parseAddressWithDict = (fullAddress) => {
   if (!fullAddress) return { il: null, ilce: null, street: fullAddress }
 
-  // Ülke ve posta kodu temizle
+  // 1. Ülke (Türkiye / Turkey) ve posta kodunu sondan temizle
   let addr = fullAddress
     .replace(/,?\s*(türkiye|turkey)\s*$/i, '')
     .replace(/,?\s*\b\d{5}\b\s*,?/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim()
 
-  const normAddr = normalize(addr)
-  let foundIl = null
-  let foundIlce = null
+  let rawIl = null
+  let rawIlce = null
+
+  // 2. Son 2 belirteci al
+  //    Öncelik: virgülle ayır → son parça = il, sondan önceki parçanın son kelimesi = ilçe
+  //    Virgül yoksa: son 2 boşlukla ayrılmış kelime
+  const parts = addr.split(',').map(s => s.trim()).filter(Boolean)
+
+  if (parts.length >= 2) {
+    rawIl = parts[parts.length - 1]
+    const prevWords = parts[parts.length - 2].split(/\s+/)
+    rawIlce = prevWords[prevWords.length - 1]
+  } else {
+    const words = addr.split(/\s+/)
+    rawIl = words[words.length - 1] || null
+    rawIlce = words.length >= 2 ? words[words.length - 2] : null
+  }
+
+  // 3. Dictionary üzerinden canonicalize et (Türkçe karakter toleransı)
+  const normIl = normalize(rawIl || '')
+  const normIlce = normalize(rawIlce || '')
+
+  let foundIl = _lookup[normIl]?.type === 'il' ? _lookup[normIl].il : null
+  let foundIlce = _lookup[normIlce]?.type === 'ilce' ? _lookup[normIlce].ilce : null
+  // İlçe biliniyorsa ilini de al
+  if (!foundIl && foundIlce) foundIl = _lookup[normIlce]?.il || null
+
+  // 4. Sokak adresini oluştur: sondaki il ve ilçeyi temizle
   let streetAddr = addr
-
-  // İlçe önce ara (daha özgün, öncelikli)
-  // Uzun isimler önce denensin (Beylikdüzü > Beyli gibi yanlış match engeli)
-  const sortedKeys = Object.keys(_lookup).sort((a, b) => b.length - a.length)
-
-  for (const key of sortedKeys) {
-    const entry = _lookup[key]
-    if (entry.type !== 'ilce') continue
-    // Kelime sınırı kontrolü: önünde/arkasında harf olmasın
-    const regex = new RegExp(`(?<![a-z])${key}(?![a-z])`)
-    if (regex.test(normAddr)) {
-      foundIlce = entry.ilce
-      foundIl = entry.il
-      // Adres stringinden ilçeyi çıkar
-      const removeRegex = new RegExp(`[,\\s]*${key}[,\\s]*`, 'i')
-      streetAddr = normalize(streetAddr) === normAddr
-        ? addr.replace(new RegExp(entry.ilce, 'i'), '').replace(/\s{2,}/g, ' ').trim()
-        : streetAddr
-      break
-    }
-  }
-
-  // İl ara (ilçe bulunmadıysa ya da il adı adreste ayrıca geçiyorsa)
-  if (!foundIl) {
-    for (const key of sortedKeys) {
-      const entry = _lookup[key]
-      if (entry.type !== 'il') continue
-      const regex = new RegExp(`(?<![a-z])${key}(?![a-z])`)
-      if (regex.test(normAddr)) {
-        foundIl = entry.il
-        break
-      }
-    }
-  }
-
-  // Bulunan il/ilçe adlarını sokak adresinden temizle
-  if (foundIlce) {
-    streetAddr = addr.replace(new RegExp(`[,\\s]*\\b${foundIlce}\\b[,\\s]*`, 'gi'), ' ').replace(/\s{2,}/g, ' ').trim()
-  }
   if (foundIl) {
-    streetAddr = streetAddr.replace(new RegExp(`[,\\s]*\\b${foundIl}\\b[,\\s]*`, 'gi'), ' ').replace(/\s{2,}/g, ' ').trim()
+    streetAddr = streetAddr.replace(new RegExp(`[,\\s]+${foundIl}\\s*$`, 'i'), '').trim()
   }
-  streetAddr = streetAddr.replace(/^[,\s]+|[,\s]+$/g, '').trim()
+  if (foundIlce) {
+    streetAddr = streetAddr.replace(new RegExp(`[,\\s]+${foundIlce}\\s*$`, 'i'), '').trim()
+  }
+  streetAddr = streetAddr.replace(/[,\s]+$/g, '').trim()
 
   return { il: foundIl, ilce: foundIlce, street: streetAddr || addr }
 }
