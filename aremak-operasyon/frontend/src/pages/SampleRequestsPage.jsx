@@ -173,7 +173,7 @@ export default function SampleRequestsPage() {
         // Teslimat adresi — dictionary ile parse et
         const rawAddress = proposal.DeliveryAddress || proposal.CustomerAddress || ''
         const { street, il: city, ilce: district } = parseAddressWithDict(rawAddress)
-        const phone = proposal.CustomerPhone || proposal.CustomerMobile || ''
+        const phone = (proposal.CustomerPhone || proposal.CustomerMobile || '').replace(/\s+/g, '')
         const recipientName = proposal.Attn?.Displayname || proposal.Attn?.Name || ''
 
         form.setFieldsValue({
