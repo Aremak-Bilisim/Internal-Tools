@@ -132,8 +132,13 @@ export default function SampleRequestsPage() {
       .then((r) => {
         const list = r.data.List || []
         setProposals(list)
-        // Teklif yoksa fırsat kalemleri fallback
-        if (list.length === 0) {
+        if (list.length > 0) {
+          // İlk teklifi otomatik seç
+          const firstId = list[0].Id
+          form.setFieldValue('tg_proposal_id', firstId)
+          handleProposalSelect(firstId)
+        } else {
+          // Teklif yoksa fırsat kalemleri fallback
           const items = (opp.Items || []).map((item) => ({
             product_id: item.Product?.Id || null,
             product_name: item.Product?.Displayname || item.Title || '',
@@ -155,8 +160,8 @@ export default function SampleRequestsPage() {
     // Posta kodunu çıkar
     addr = addr.replace(/,?\s*\b\d{5}\b\s*,?/g, ',').replace(/,\s*,/g, ',').replace(/^,|,$/g, '').trim()
 
-    // Sonda "İlçe/İl" veya "İlçe/ İl" formatını yakala (virgülsüz de olabilir)
-    const slashEnd = addr.match(/^(.*?)\s+([^,/]+)\s*\/\s*([^,/]+)\s*$/s)
+    // Format 1: sonda "İlçe/İl" → "... ÇANKAYA/ANKARA"
+    const slashEnd = addr.match(/^(.*?)\s+([^,/\s]+)\s*\/\s*([^,/\s]+)\s*$/s)
     if (slashEnd) {
       return {
         street: slashEnd[1].replace(/,\s*$/, '').trim(),
@@ -165,7 +170,7 @@ export default function SampleRequestsPage() {
       }
     }
 
-    // Virgülle böl
+    // Format 2: virgülle ayrılmış parçalar
     const parts = addr.split(',').map((p) => p.trim()).filter(Boolean)
     if (parts.length >= 3) {
       return {
@@ -177,6 +182,22 @@ export default function SampleRequestsPage() {
     if (parts.length === 2) {
       return { street: parts[0], city: parts[1] }
     }
+
+    // Format 3: virgül yok — son kelimeyi ilçe say
+    // (Sokak/Cadde kısaltmaları değilse: MAH BLV CAD SOK NO vb. hariç)
+    const streetSuffixes = /^(MAH\.?|MH\.?|BLV\.?|BLVD\.?|CAD\.?|SOK\.?|SK\.?|NO:?\d|İÇ:?\d|DAIRE|D:?\d|KAT|APT\.?|SİT\.?)$/i
+    const words = addr.split(/\s+/)
+    let districtIdx = -1
+    for (let i = words.length - 1; i >= 0; i--) {
+      if (!streetSuffixes.test(words[i])) { districtIdx = i; break }
+    }
+    if (districtIdx > 0) {
+      return {
+        street: words.slice(0, districtIdx).join(' ').trim(),
+        district: words.slice(districtIdx).join(' ').trim(),
+      }
+    }
+
     return { street: addr }
   }
 
