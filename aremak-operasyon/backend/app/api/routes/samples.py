@@ -136,6 +136,11 @@ async def get_opportunity_proposals(opp_id: int, current_user=Depends(get_curren
     return await teamgram.get_proposals_for_opportunity(opp_id)
 
 
+@router.get("/proposals/{proposal_id}")
+async def get_proposal(proposal_id: int, current_user=Depends(get_current_user)):
+    return await teamgram.get_proposal(proposal_id)
+
+
 # ── Sample CRUD ───────────────────────────────────────────────────────────────
 
 @router.get("")

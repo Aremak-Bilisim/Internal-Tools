@@ -144,16 +144,21 @@ export default function SampleRequestsPage() {
   }
 
   const handleProposalSelect = (proposalId) => {
-    const proposal = proposals.find((p) => p.Id === proposalId)
-    if (!proposal) return
-    const items = (proposal.Items || proposal.Lines || proposal.Products || []).map((item) => ({
-      product_id: item.Product?.Id || item.ProductId || null,
-      product_name: item.Product?.Displayname || item.Product?.Name || item.Title || item.ProductName || '',
-      quantity: item.Quantity || 1,
-      shelf: '',
-    }))
-    setOppItems(items)
-    form.setFieldValue('items', items)
+    if (!proposalId) return
+    // Proposals/Index sadece özet bilgi verir, Items için Proposals/Get gerekiyor
+    api.get(`/samples/proposals/${proposalId}`)
+      .then((r) => {
+        const proposal = r.data
+        const items = (proposal.Items || []).map((item) => ({
+          product_id: item.Product?.Id || null,
+          product_name: item.Product?.Displayname || item.Product?.Name || item.Title || '',
+          quantity: item.Quantity || 1,
+          shelf: '',
+        }))
+        setOppItems(items)
+        form.setFieldValue('items', items)
+      })
+      .catch(() => message.error('Teklif detayı yüklenemedi'))
   }
 
   const handleSubmit = async () => {
@@ -309,7 +314,7 @@ export default function SampleRequestsPage() {
                 onChange={handleProposalSelect}
                 options={(proposals).map((p) => ({
                   value: p.Id,
-                  label: p.Title || p.Name || p.ProposalNo || `Teklif #${p.Id}`,
+                  label: p.Displayname || p.Name || `Teklif #${p.Id}`,
                 }))}
               />
             </Form.Item>

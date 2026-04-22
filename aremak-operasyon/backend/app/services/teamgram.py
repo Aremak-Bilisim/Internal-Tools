@@ -333,37 +333,20 @@ async def get_metadata() -> dict:
 
 async def get_proposals_for_opportunity(opportunity_id: int) -> dict:
     """
-    Bir fırsata bağlı teklifleri çeker.
-    TeamGram'da teklifler Proposals/Index veya Quotes/Index altında olabilir.
+    Bir fırsatın şirketine ait teklifleri çeker (Proposals/Index?ofid=entity_id).
+    Proposals/Index, ofid parametresiyle bir şirkete/nesneye ait teklifleri listeler.
     """
-    # Önce tam fırsatı çek — içinde Proposals / Quotes array var mı?
     opp = await get_opportunity(opportunity_id)
+    entity_id = (opp.get("RelatedEntity") or {}).get("Id")
+    if not entity_id:
+        return {"List": []}
+    data = await _get(f"{DOMAIN}/Proposals/Index", {"ofid": entity_id, "page": 1, "pagesize": 50})
+    return {"List": data.get("List") or []}
 
-    # Fırsat içinde gömülü teklif listesi var mı?
-    proposals = opp.get("Proposals") or opp.get("Quotes") or opp.get("Teklifler") or []
-    if proposals:
-        return {"List": proposals, "Source": "opportunity_embedded"}
 
-    # Yoksa Proposals/Index endpoint'ini dene
-    try:
-        data = await _get(f"{DOMAIN}/Proposals/Index", {"opportunityId": opportunity_id, "page": 1, "pagesize": 50})
-        items = data.get("List") or data.get("Proposals") or data.get("data") or []
-        if items:
-            return {"List": items, "Source": "proposals_index"}
-    except Exception:
-        pass
-
-    # Quotes/Index dene
-    try:
-        data = await _get(f"{DOMAIN}/Quotes/Index", {"opportunityId": opportunity_id, "page": 1, "pagesize": 50})
-        items = data.get("List") or data.get("Quotes") or data.get("data") or []
-        if items:
-            return {"List": items, "Source": "quotes_index"}
-    except Exception:
-        pass
-
-    # Bulunamazsa ham opportunity'yi döndür, geliştirici inceleyebilsin
-    return {"List": [], "Source": "not_found", "raw_keys": list(opp.keys())}
+async def get_proposal(proposal_id: int) -> dict:
+    """Teklifin tam detayını çeker — Items dahil."""
+    return await _get(f"{DOMAIN}/Proposals/Get", {"id": proposal_id})
 
 
 async def get_opportunities(page: int = 1, pagesize: int = 100) -> dict:
