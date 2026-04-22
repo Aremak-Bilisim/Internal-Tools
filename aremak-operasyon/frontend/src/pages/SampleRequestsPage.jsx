@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { parseAddressWithDict } from '../data/turkiyeAdresler'
 
 const { Title, Text } = Typography
 
@@ -153,54 +154,6 @@ export default function SampleRequestsPage() {
       .finally(() => setProposalsLoading(false))
   }
 
-  const parseAddress = (fullAddress) => {
-    if (!fullAddress) return {}
-    // Ülkeyi çıkar
-    let addr = fullAddress.replace(/,?\s*(türkiye|turkey)\s*$/i, '').trim()
-    // Posta kodunu çıkar
-    addr = addr.replace(/,?\s*\b\d{5}\b\s*,?/g, ',').replace(/,\s*,/g, ',').replace(/^,|,$/g, '').trim()
-
-    // Format 1: sonda "İlçe/İl" → "... ÇANKAYA/ANKARA"
-    const slashEnd = addr.match(/^(.*?)\s+([^,/\s]+)\s*\/\s*([^,/\s]+)\s*$/s)
-    if (slashEnd) {
-      return {
-        street: slashEnd[1].replace(/,\s*$/, '').trim(),
-        district: slashEnd[2].trim(),
-        city: slashEnd[3].trim(),
-      }
-    }
-
-    // Format 2: virgülle ayrılmış parçalar
-    const parts = addr.split(',').map((p) => p.trim()).filter(Boolean)
-    if (parts.length >= 3) {
-      return {
-        street: parts.slice(0, -2).join(', '),
-        district: parts[parts.length - 2],
-        city: parts[parts.length - 1],
-      }
-    }
-    if (parts.length === 2) {
-      return { street: parts[0], city: parts[1] }
-    }
-
-    // Format 3: virgül yok — son kelimeyi ilçe say
-    // (Sokak/Cadde kısaltmaları değilse: MAH BLV CAD SOK NO vb. hariç)
-    const streetSuffixes = /^(MAH\.?|MH\.?|BLV\.?|BLVD\.?|CAD\.?|SOK\.?|SK\.?|NO:?\d|İÇ:?\d|DAIRE|D:?\d|KAT|APT\.?|SİT\.?)$/i
-    const words = addr.split(/\s+/)
-    let districtIdx = -1
-    for (let i = words.length - 1; i >= 0; i--) {
-      if (!streetSuffixes.test(words[i])) { districtIdx = i; break }
-    }
-    if (districtIdx > 0) {
-      return {
-        street: words.slice(0, districtIdx).join(' ').trim(),
-        district: words.slice(districtIdx).join(' ').trim(),
-      }
-    }
-
-    return { street: addr }
-  }
-
   const handleProposalSelect = (proposalId) => {
     if (!proposalId) return
     // Proposals/Index sadece özet bilgi verir, Items için Proposals/Get gerekiyor
@@ -217,9 +170,9 @@ export default function SampleRequestsPage() {
         }))
         setOppItems(items)
 
-        // Teslimat adresi — parse et
+        // Teslimat adresi — dictionary ile parse et
         const rawAddress = proposal.DeliveryAddress || proposal.CustomerAddress || ''
-        const { street, district, city } = parseAddress(rawAddress)
+        const { street, il: city, ilce: district } = parseAddressWithDict(rawAddress)
         const phone = proposal.CustomerPhone || proposal.CustomerMobile || ''
         const recipientName = proposal.Attn?.Displayname || proposal.Attn?.Name || ''
 
