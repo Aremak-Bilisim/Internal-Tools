@@ -114,6 +114,15 @@ async def trigger_sync(
     return {"message": "Ürün sync başlatıldı"}
 
 
+@router.post("/sync-parasut")
+async def trigger_parasut_sync(
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_current_user),
+):
+    background_tasks.add_task(product_sync.sync_parasut_match)
+    return {"message": "Paraşüt eşleştirme başlatıldı"}
+
+
 # ── CREATE ────────────────────────────────────────────────────────────────────
 
 class ProductCreate(BaseModel):

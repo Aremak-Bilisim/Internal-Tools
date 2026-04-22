@@ -44,6 +44,7 @@ export default function ProductsPage() {
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [parasutSyncing, setParasutSyncing] = useState(false)
   const [page, setPage] = useState(1)
   const [pagesize] = useState(50)
 
@@ -121,12 +122,25 @@ export default function ProductsPage() {
     setSyncing(true)
     try {
       await api.post('/products/sync')
-      message.info('Senkronizasyon başlatıldı, tamamlanınca liste güncellenecek.')
+      message.info('TG senkronizasyonu başlatıldı.')
       setTimeout(() => fetchData(), 5000)
     } catch {
       message.error('Sync başlatılamadı')
     } finally {
       setSyncing(false)
+    }
+  }
+
+  const handleParasutSync = async () => {
+    setParasutSyncing(true)
+    try {
+      await api.post('/products/sync-parasut')
+      message.info('Paraşüt eşleştirme başlatıldı.')
+      setTimeout(() => fetchData(), 8000)
+    } catch {
+      message.error('Paraşüt sync başlatılamadı')
+    } finally {
+      setParasutSyncing(false)
     }
   }
 
@@ -404,6 +418,9 @@ export default function ProductsPage() {
         <Space>
           <Button icon={<ReloadOutlined />} loading={syncing} onClick={handleSync}>
             TG Sync
+          </Button>
+          <Button icon={<ReloadOutlined />} loading={parasutSyncing} onClick={handleParasutSync}>
+            Paraşüt Sync
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             Yeni Ürün
