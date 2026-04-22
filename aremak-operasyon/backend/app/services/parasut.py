@@ -530,3 +530,26 @@ async def create_irsaliye_from_invoice(
     with open("debug_shipment.log", "a", encoding="utf-8") as _f:
         _f.write(f"[{_dt.datetime.now()}] parasut_attrs: {attrs}\n")
     return await _api_post("shipment_documents", payload)
+
+
+async def search_product_by_code(code: str) -> Optional[dict]:
+    """Paraşüt'te stok kodu (code) ile ürün arar. Eşleşen ilk ürünü döndürür.
+    Returns: {id, name, code, url} ya da None."""
+    if not code:
+        return None
+    try:
+        data = await _api_get("products", {"filter[code]": code, "page[size]": 5})
+        items = data.get("data", [])
+        if items:
+            p = items[0]
+            pid = p["id"]
+            attrs = p.get("attributes", {})
+            return {
+                "id": pid,
+                "name": attrs.get("name"),
+                "code": attrs.get("code"),
+                "url": f"https://uygulama.parasut.com/{COMPANY}/stok/{pid}",
+            }
+    except Exception as e:
+        logger.warning(f"Paraşüt ürün arama hatası ({code}): {e}")
+    return None

@@ -4,15 +4,20 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.product import Product
 from app.services import teamgram
 from app.services import product_sync
+from app.services import parasut as parasut_svc
 
 router = APIRouter()
 
 CURRENCY_NAME_TO_ID = {"TL": 1, "TRY": 1, "USD": 2, "EUR": 3}
 CURRENCY_ID_TO_NAME = {1: "TL", 2: "USD", 3: "EUR"}
+
+TG_DOMAIN = settings.TEAMGRAM_DOMAIN
+PARASUT_COMPANY = settings.PARASUT_COMPANY_ID
 
 
 def _to_dict(p: Product) -> dict:
@@ -37,6 +42,9 @@ def _to_dict(p: Product) -> dict:
         "critical_inventory": p.critical_inventory,
         "details": p.details,
         "not_available": p.not_available,
+        "tg_url": f"https://www.teamgram.com/{TG_DOMAIN}/products/show?id={p.tg_id}",
+        "parasut_url": f"https://uygulama.parasut.com/{PARASUT_COMPANY}/stok/{p.parasut_id}" if p.parasut_id else None,
+        "parasut_id": p.parasut_id,
     }
 
 
@@ -249,6 +257,35 @@ async def edit_product(
     await product_sync.sync_one(product_id)
 
     return {"message": "Ürün güncellendi"}
+
+
+# ── PARAŞÜT KONTROL ──────────────────────────────────────────────────────────
+
+@router.get("/{product_id}/parasut")
+async def check_parasut(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Ürünün SKU'su ile Paraşüt'te ürün ara. Bulunursa parasut_id DB'ye yaz."""
+    p = db.query(Product).filter(Product.tg_id == product_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    if not p.sku:
+        return {"found": False, "message": "SKU boş, arama yapılamadı"}
+
+    result = await parasut_svc.search_product_by_code(p.sku)
+    if result:
+        p.parasut_id = result["id"]
+        db.commit()
+        return {
+            "found": True,
+            "parasut_id": result["id"],
+            "name": result["name"],
+            "code": result["code"],
+            "url": result["url"],
+        }
+    return {"found": False, "message": f"'{p.sku}' stok kodu Paraşüt'te bulunamadı"}
 
 
 # ── INVENTORY ─────────────────────────────────────────────────────────────────

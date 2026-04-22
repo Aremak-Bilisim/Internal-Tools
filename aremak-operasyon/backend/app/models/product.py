@@ -35,4 +35,6 @@ class Product(Base):
     details = Column(Text, nullable=True)
     not_available = Column(Boolean, default=False)  # Pasif
 
+    parasut_id = Column(String, nullable=True, index=True)  # Paraşüt ürün ID (eşleşince dolar)
+
     synced_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

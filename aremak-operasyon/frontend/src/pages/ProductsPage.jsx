@@ -6,7 +6,7 @@ import {
 } from 'antd'
 import {
   SearchOutlined, PlusOutlined, ReloadOutlined, EditOutlined,
-  BoxPlotOutlined,
+  BoxPlotOutlined, LinkOutlined, CheckCircleOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 
@@ -76,6 +76,8 @@ export default function ProductsPage() {
   // Detail drawer
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailRecord, setDetailRecord] = useState(null)
+  const [parasutCheck, setParasutCheck] = useState(null)   // null | {loading} | {found, ...}
+  const [parasutLoading, setParasutLoading] = useState(false)
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -215,6 +217,24 @@ export default function ProductsPage() {
     setEditOpen(true)
   }
 
+  const checkParasut = async (record) => {
+    setParasutLoading(true)
+    setParasutCheck(null)
+    try {
+      const r = await api.get(`/products/${record.tg_id}/parasut`)
+      setParasutCheck(r.data)
+      if (r.data.found) {
+        // Detay kaydını güncelle (parasut_url artık dolu)
+        setDetailRecord(prev => prev ? { ...prev, parasut_id: r.data.parasut_id, parasut_url: r.data.url } : prev)
+        fetchData()
+      }
+    } catch {
+      setParasutCheck({ found: false, message: 'Kontrol sırasında hata oluştu' })
+    } finally {
+      setParasutLoading(false)
+    }
+  }
+
   const submitEdit = async () => {
     let values
     try { values = await editForm.validateFields() } catch { return }
@@ -328,7 +348,7 @@ export default function ProductsPage() {
               type="text"
               size="small"
               icon={<BoxPlotOutlined />}
-              onClick={() => { setDetailRecord(r); setDetailOpen(true) }}
+              onClick={() => { setDetailRecord(r); setDetailOpen(true); setParasutCheck(null) }}
             />
           </Tooltip>
           <Tooltip title="Düzenle">
@@ -752,7 +772,7 @@ export default function ProductsPage() {
         title={detailRecord ? `${detailRecord.brand} ${detailRecord.prod_model}` : 'Ürün Detayı'}
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
-        width={480}
+        width={500}
         extra={
           <Button icon={<EditOutlined />} onClick={() => { setDetailOpen(false); openEdit(detailRecord) }}>
             Düzenle
@@ -760,39 +780,85 @@ export default function ProductsPage() {
         }
       >
         {detailRecord && (
-          <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="Marka">{detailRecord.brand || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Model">{detailRecord.prod_model || '-'}</Descriptions.Item>
-            <Descriptions.Item label="SKU">
-              <Text code>{detailRecord.sku || '-'}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="Kategori">
-              {detailRecord.parent_category_name && `${detailRecord.parent_category_name} / `}
-              {detailRecord.category_name || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Satış Fiyatı">
-              {formatPrice(detailRecord.price, detailRecord.currency_name)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Alış Fiyatı">
-              {formatPrice(detailRecord.purchase_price, detailRecord.purchase_currency_name)}
-            </Descriptions.Item>
-            <Descriptions.Item label="KDV">{detailRecord.vat != null ? `%${detailRecord.vat}` : '-'}</Descriptions.Item>
-            <Descriptions.Item label="Birim">{detailRecord.unit || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Stok">
-              {detailRecord.no_inventory
-                ? <Tag>Takipsiz</Tag>
-                : <Tag color={detailRecord.inventory > 0 ? 'green' : 'red'}>{detailRecord.inventory ?? 0}</Tag>}
-            </Descriptions.Item>
-            <Descriptions.Item label="Kritik Stok">{detailRecord.critical_inventory ?? 0}</Descriptions.Item>
-            <Descriptions.Item label="Durum">
-              {detailRecord.not_available ? <Tag color="red">Pasif</Tag> : <Tag color="green">Aktif</Tag>}
-            </Descriptions.Item>
-            {detailRecord.details && (
-              <Descriptions.Item label="Açıklama">
-                <Text style={{ whiteSpace: 'pre-wrap' }}>{detailRecord.details}</Text>
-              </Descriptions.Item>
+          <>
+            {/* Dış Linkler */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <Button
+                icon={<LinkOutlined />}
+                href={detailRecord.tg_url}
+                target="_blank"
+                size="small"
+              >
+                TeamGram'da Aç
+              </Button>
+
+              {detailRecord.parasut_url ? (
+                <Button
+                  icon={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
+                  href={detailRecord.parasut_url}
+                  target="_blank"
+                  size="small"
+                >
+                  Paraşüt'te Aç
+                </Button>
+              ) : (
+                <Button
+                  icon={<QuestionCircleOutlined />}
+                  size="small"
+                  loading={parasutLoading}
+                  onClick={() => checkParasut(detailRecord)}
+                >
+                  Paraşüt'te Kontrol Et
+                </Button>
+              )}
+            </div>
+
+            {/* Paraşüt kontrol sonucu */}
+            {parasutCheck && !parasutCheck.found && (
+              <div style={{ marginBottom: 12, padding: '6px 12px', background: '#fff2f0', borderRadius: 6, fontSize: 12, color: '#cf1322' }}>
+                {parasutCheck.message}
+              </div>
             )}
-          </Descriptions>
+            {parasutCheck?.found && (
+              <div style={{ marginBottom: 12, padding: '6px 12px', background: '#f6ffed', borderRadius: 6, fontSize: 12, color: '#389e0d' }}>
+                ✓ Paraşüt'te bulundu — <a href={parasutCheck.url} target="_blank" rel="noreferrer">{parasutCheck.name || parasutCheck.code}</a>
+              </div>
+            )}
+
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="Marka">{detailRecord.brand || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Model">{detailRecord.prod_model || '-'}</Descriptions.Item>
+              <Descriptions.Item label="SKU">
+                <Text code>{detailRecord.sku || '-'}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="Kategori">
+                {detailRecord.parent_category_name && `${detailRecord.parent_category_name} / `}
+                {detailRecord.category_name || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Satış Fiyatı">
+                {formatPrice(detailRecord.price, detailRecord.currency_name)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Alış Fiyatı">
+                {formatPrice(detailRecord.purchase_price, detailRecord.purchase_currency_name)}
+              </Descriptions.Item>
+              <Descriptions.Item label="KDV">{detailRecord.vat != null ? `%${detailRecord.vat}` : '-'}</Descriptions.Item>
+              <Descriptions.Item label="Birim">{detailRecord.unit || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Stok">
+                {detailRecord.no_inventory
+                  ? <Tag>Takipsiz</Tag>
+                  : <Tag color={detailRecord.inventory > 0 ? 'green' : 'red'}>{detailRecord.inventory ?? 0}</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="Kritik Stok">{detailRecord.critical_inventory ?? 0}</Descriptions.Item>
+              <Descriptions.Item label="Durum">
+                {detailRecord.not_available ? <Tag color="red">Pasif</Tag> : <Tag color="green">Aktif</Tag>}
+              </Descriptions.Item>
+              {detailRecord.details && (
+                <Descriptions.Item label="Açıklama">
+                  <Text style={{ whiteSpace: 'pre-wrap' }}>{detailRecord.details}</Text>
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+          </>
         )}
       </Drawer>
     </div>
