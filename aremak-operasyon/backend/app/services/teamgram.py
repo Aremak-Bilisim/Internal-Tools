@@ -349,16 +349,24 @@ async def get_proposal(proposal_id: int) -> dict:
     return await _get(f"{DOMAIN}/Proposals/Get", {"id": proposal_id})
 
 
-async def get_opportunities(page: int = 1, pagesize: int = 100) -> dict:
-    """Fetch open opportunities filtered to numune pipeline stage."""
-    data = await _get(f"{DOMAIN}/Opportunities/Index", {
-        "page": page,
-        "pagesize": pagesize,
-        "bfilterby_status_openactive": "true",
-    })
-    items = data.get("List") or []
+async def get_opportunities() -> dict:
+    """
+    Tüm fırsatları sayfalı çekip Inbound pipeline / Numune-Demo aşamasına göre filtreler.
+    bfilterby_status_openactive bazı aktif fırsatları dışarıda bıraktığı için kullanılmıyor.
+    """
+    all_items = []
+    page = 1
+    while True:
+        data = await _get(f"{DOMAIN}/Opportunities/Index", {"page": page, "pagesize": 100})
+        items = data.get("Opportunities") or []
+        all_items.extend(items)
+        total = data.get("OpportunityCount") or 0
+        if len(all_items) >= total or not items:
+            break
+        page += 1
+
     filtered = [
-        o for o in items
+        o for o in all_items
         if (o.get("CustomPipelineName") or "").lower() == "inbound"
         and (o.get("CustomStage") or "") == "Numune/Demo Alım Süreci"
     ]
