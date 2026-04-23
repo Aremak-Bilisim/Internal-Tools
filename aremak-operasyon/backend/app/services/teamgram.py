@@ -38,6 +38,15 @@ async def _post(path: str, payload: dict) -> dict:
         return r.json()
 
 
+async def _post_v1(path: str, payload: dict) -> dict:
+    """TeamGram v1 API'ye POST isteği gönderir."""
+    url = f"{BASE}/v1/{path}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
 async def get_products(page: int = 1, pagesize: int = 50) -> dict:
     return await _get(f"{DOMAIN}/Products/Index", {"page": page, "pagesize": pagesize})
 
@@ -376,10 +385,11 @@ async def get_opportunity(opportunity_id: int) -> dict:
 
 async def inventory_adjustment(product_id: int, quantity: float, reason: int = 8) -> dict:
     """
-    Adjust product inventory. reason=10 → InventoryUsed (for samples sent out).
-    quantity should be positive; the API records it as a decrease for reason=10.
+    Adjust product inventory in TeamGram.
+    reason=8 → Diğer (for samples sent out).
+    quantity should be positive.
     """
-    return await _post(f"{DOMAIN}/Products/InventoryAdjustment", {
+    return await _post_v1(f"{DOMAIN}/Products/InventoryAdjustment", {
         "ProductId": product_id,
         "Quantity": quantity,
         "Reason": reason,
