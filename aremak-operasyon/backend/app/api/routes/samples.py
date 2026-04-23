@@ -352,7 +352,7 @@ async def advance_stage(
     )
     db.add(history)
 
-    # On shipped: adjust TG inventory for each item
+    # On shipped: adjust TG inventory for each item (best-effort, silent on failure)
     warnings = []
     if new_stage == "shipped":
         for item in (s.items or []):
@@ -362,7 +362,7 @@ async def advance_stage(
                 try:
                     await teamgram.inventory_adjustment(product_id, quantity, reason=8)
                 except Exception as e:
-                    warnings.append(f"TG stok güncellenemedi ({item.get('product_name', product_id)}): {e}")
+                    logger.warning(f"TG stok güncellenemedi ({item.get('product_name', product_id)}): {e}")
 
     # Notify relevant users
     notify_roles = []
