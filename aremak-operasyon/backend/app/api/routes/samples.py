@@ -360,7 +360,10 @@ async def advance_stage(
             quantity = item.get("quantity") or 0
             if product_id and quantity:
                 try:
-                    await teamgram.inventory_adjustment(product_id, quantity, reason=8)
+                    await teamgram.inventory_adjustment(
+                        product_id, quantity, reason=10,
+                        desc=f"Numune - {s.tg_opportunity_name or s.customer_name}"
+                    )
                 except Exception as e:
                     warnings.append(f"TG stok güncellenemedi ({item.get('product_name', product_id)}): {e}")
 
