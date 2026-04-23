@@ -362,7 +362,7 @@ async def advance_stage(
                 try:
                     await teamgram.inventory_adjustment(product_id, quantity, reason=8)
                 except Exception as e:
-                    logger.warning(f"TG stok güncellenemedi ({item.get('product_name', product_id)}): {e}")
+                    warnings.append(f"TG stok güncellenemedi ({item.get('product_name', product_id)}): {e}")
 
     # Notify relevant users
     notify_roles = []

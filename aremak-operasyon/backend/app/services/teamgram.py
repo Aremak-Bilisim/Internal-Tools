@@ -386,11 +386,11 @@ async def get_opportunity(opportunity_id: int) -> dict:
 async def inventory_adjustment(product_id: int, quantity: float, reason: int = 8) -> dict:
     """
     Adjust product inventory in TeamGram.
-    reason=8 → Diğer (for samples sent out).
-    quantity should be positive.
+    reason=8 → CustomerOrderShipped (numune çıkışı için uygun)
+    Field names: nInvAdj_ prefix zorunlu.
     """
-    return await _post_v1(f"{DOMAIN}/Products/InventoryAdjustment", {
-        "ProductId": product_id,
-        "Quantity": quantity,
-        "Reason": reason,
+    return await _post(f"{DOMAIN}/Products/InventoryAdjustment", {
+        "nInvAdj_ProductId": product_id,
+        "nInvAdj_Quantity": quantity,
+        "nInvAdj_Reason": reason,
     })
