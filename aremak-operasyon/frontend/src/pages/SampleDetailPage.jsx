@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Modal, Input, Upload, Image, Drawer, Form, Select, InputNumber, DatePicker, Row, Col } from 'antd'
-import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, CloseOutlined, UploadOutlined, EditOutlined, SendOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, CloseOutlined, UploadOutlined, EditOutlined, SendOutlined, PaperClipOutlined, FilePdfOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import api from '../services/api'
@@ -50,6 +50,7 @@ export default function SampleDetailPage() {
   const [noteText, setNoteText] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
+  const [uploadingPdf, setUploadingPdf] = useState(false)
   const [editDrawerOpen, setEditDrawerOpen] = useState(false)
   const [editForm] = Form.useForm()
   const [editSubmitting, setEditSubmitting] = useState(false)
@@ -73,7 +74,9 @@ export default function SampleDetailPage() {
 
   useEffect(() => { load() }, [id])
 
+  const canShip = sample?.stage === 'preparing' && !!sample?.cargo_pdf_url
   const canAdvance = sample && user && STAGE_ROLES[sample.stage]?.includes(user.role)
+    && (sample.stage !== 'preparing' || canShip)
   const canRequestRevision = user?.role === 'admin' && sample?.stage === 'pending_admin'
   const canReject = user?.role === 'admin' && !['shipped', 'iptal_edildi'].includes(sample?.stage)
 
@@ -108,6 +111,25 @@ export default function SampleDetailPage() {
       message.error(e?.response?.data?.detail || 'Hata oluştu')
     } finally {
       setAdvancing(false)
+    }
+  }
+
+  const uploadCargoPdf = async ({ file, onSuccess, onError }) => {
+    setUploadingPdf(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const r = await api.post(`/samples/${id}/upload/cargo-pdf`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setSample(r.data)
+      message.success('Kargo fişi yüklendi')
+      onSuccess(r.data)
+    } catch (e) {
+      message.error('Yükleme başarısız')
+      onError(e)
+    } finally {
+      setUploadingPdf(false)
     }
   }
 
@@ -237,20 +259,52 @@ export default function SampleDetailPage() {
               </div>
             )}
 
-            {/* Sevke hazırlık: fotoğraf yükleme */}
+            {/* Sevke hazırlık: kargo fişi + fotoğraf */}
             {isPreparingStage && (
-              <div style={{ marginTop: 20 }}>
+              <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 8, padding: 16 }}>
-                  <Text strong style={{ display: 'block', marginBottom: 12 }}>Kargo Fotoğrafları</Text>
-                  <Space wrap>
-                    {(sample.cargo_photo_urls || []).map((url, i) => (
-                      <Image key={i} src={url} width={72} height={72} style={{ objectFit: 'cover', borderRadius: 4 }} />
-                    ))}
-                    <Upload customRequest={handlePhotoUpload} showUploadList={false} accept="image/*" multiple>
-                      <Button icon={<UploadOutlined />} loading={uploadingPhotos} size="small">Fotoğraf Ekle</Button>
-                    </Upload>
-                  </Space>
+                  <Text strong style={{ display: 'block', marginBottom: 12 }}>Sevk Öncesi Belgeler</Text>
+
+                  {/* Kargo Fişi PDF */}
+                  <div style={{ marginBottom: 12 }}>
+                    <Text style={{ display: 'block', marginBottom: 6 }}>
+                      Kargo Fişi (PDF) <Text type="danger">*</Text>
+                    </Text>
+                    {sample.cargo_pdf_url ? (
+                      <Space>
+                        <Tag color="green" icon={<PaperClipOutlined />}>
+                          <a href={sample.cargo_pdf_url} target="_blank" rel="noreferrer">Kargo Fişi Yüklendi</a>
+                        </Tag>
+                        <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
+                          <Button size="small">Değiştir</Button>
+                        </Upload>
+                      </Space>
+                    ) : (
+                      <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
+                        <Button icon={<UploadOutlined />} loading={uploadingPdf}>PDF Yükle</Button>
+                      </Upload>
+                    )}
+                  </div>
+
+                  {/* Fotoğraflar */}
+                  <div>
+                    <Text style={{ display: 'block', marginBottom: 6 }}>Kargo Fotoğrafları</Text>
+                    <Space wrap>
+                      {(sample.cargo_photo_urls || []).map((url, i) => (
+                        <Image key={i} src={url} width={72} height={72} style={{ objectFit: 'cover', borderRadius: 4 }} />
+                      ))}
+                      <Upload customRequest={handlePhotoUpload} showUploadList={false} accept="image/*" multiple>
+                        <Button icon={<UploadOutlined />} loading={uploadingPhotos} size="small">Fotoğraf Ekle</Button>
+                      </Upload>
+                    </Space>
+                  </div>
                 </div>
+
+                {!sample.cargo_pdf_url && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    ⚠ Sevk edildi olarak işaretlemek için kargo fişini yükleyin.
+                  </Text>
+                )}
               </div>
             )}
 
@@ -370,16 +424,35 @@ export default function SampleDetailPage() {
             </Card>
           )}
 
-          {/* Sevk fotoğrafları (shipped aşamasında) */}
-          {shipped && sample.cargo_photo_urls?.length > 0 && (
-            <Card title="Sevk Fotoğrafları" size="small">
-              <Image.PreviewGroup>
-                <Space wrap>
-                  {sample.cargo_photo_urls.map((url, i) => (
-                    <Image key={i} src={url} width={80} height={80} style={{ objectFit: 'cover', borderRadius: 4 }} />
-                  ))}
-                </Space>
-              </Image.PreviewGroup>
+          {/* Sevk belgeleri (shipped aşamasında) */}
+          {shipped && (sample.cargo_pdf_url || sample.cargo_photo_urls?.length > 0) && (
+            <Card title="Sevk Belgeleri" size="small">
+              {sample.cargo_pdf_url && (
+                <div style={{ marginBottom: 12 }}>
+                  <Button
+                    icon={<FilePdfOutlined />}
+                    size="small"
+                    href={sample.cargo_pdf_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
+                  >
+                    Kargo Fişi (PDF)
+                  </Button>
+                </div>
+              )}
+              {sample.cargo_photo_urls?.length > 0 && (
+                <>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>Sevk Fotoğrafları</Text>
+                  <Image.PreviewGroup>
+                    <Space wrap>
+                      {sample.cargo_photo_urls.map((url, i) => (
+                        <Image key={i} src={url} width={80} height={80} style={{ objectFit: 'cover', borderRadius: 4 }} />
+                      ))}
+                    </Space>
+                  </Image.PreviewGroup>
+                </>
+              )}
             </Card>
           )}
 

@@ -468,6 +468,27 @@ def cancel_sample(
     return _sample_to_dict(s)
 
 
+@router.post("/{sample_id}/upload/cargo-pdf")
+def upload_cargo_pdf(
+    sample_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("warehouse", "admin")),
+):
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+    ext = os.path.splitext(file.filename or "")[1] or ".pdf"
+    fname = f"sample_cargo_pdf_{sample_id}_{uuid.uuid4().hex[:8]}{ext}"
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    with open(fpath, "wb") as f:
+        f.write(file.file.read())
+    s.cargo_pdf_url = f"/uploads/{fname}"
+    db.commit()
+    db.refresh(s)
+    return _sample_to_dict(s)
+
+
 @router.post("/{sample_id}/photo")
 async def upload_photo(
     sample_id: int,
