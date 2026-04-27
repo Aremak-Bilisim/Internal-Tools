@@ -68,7 +68,7 @@ def is_skip(line: str) -> bool:
 
 
 COMPANY_SUFFIX_RE = re.compile(
-    r"\b(LTD|ŞT[İI]|A\.?Ş\.?|AS\b|TİC|TIC|SAN|ANONİM|LİMİTED|LIMITED|INC|GMBH|VAKFI|DERNEĞİ|ÜNİVERSİTESİ|KOOP)",
+    r"\b(LTD|ŞT[İI]|ŞİRKET|SIRKET|A\.?Ş\.?|AS\b|TİC|TIC|SAN|ANONİM|ANONIM|LİMİTED|LIMITED|INC|GMBH|VAKFI|DERNEĞİ|ÜNİVERSİTESİ|KOOP|HOLDING)",
     re.IGNORECASE,
 )
 ADDRESS_HINT_RE = re.compile(
