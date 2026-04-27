@@ -156,6 +156,14 @@ async def list_orders_tree(
         else:
             roots.append(it)
 
+    # Sipariş tarihine göre sırala — en yeni başta
+    def _date_key(o):
+        return o.get("OrderDate") or ""
+    roots.sort(key=_date_key, reverse=True)
+    for it in by_id.values():
+        if it.get("children"):
+            it["children"].sort(key=_date_key, reverse=True)
+
     for it in by_id.values():
         if not it["children"]:
             it.pop("children", None)
