@@ -79,16 +79,16 @@ export default function PurchaseOrderArchiveDetailPage() {
             }
             extra={
               <Space>
-                {po.knack_pdf_url && (
+                {(po.pdf_url || po.local_pdf_url || po.knack_pdf_url) && (
                   <Button
                     size="small"
                     icon={<FilePdfOutlined />}
-                    href={po.knack_pdf_url}
+                    href={po.pdf_url || po.local_pdf_url || po.knack_pdf_url}
                     target="_blank"
                     rel="noreferrer"
                     style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
                   >
-                    Knack PDF
+                    Proforma PDF
                   </Button>
                 )}
                 {po.tg_url && (
