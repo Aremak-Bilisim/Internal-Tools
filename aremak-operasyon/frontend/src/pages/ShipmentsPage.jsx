@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { Table, Card, Tag, Button, Typography, Tabs } from 'antd'
-import { EyeOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Table, Card, Tag, Button, Typography, Tabs, DatePicker, Select, Space } from 'antd'
+import { EyeOutlined, ThunderboltOutlined, ClearOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+
+const { RangePicker } = DatePicker
 
 const { Title, Text } = Typography
 
@@ -71,6 +73,8 @@ export default function ShipmentsPage() {
   const [loading, setLoading] = useState(true)
   const [activeStage, setActiveStage] = useState('all')
   const [usersByRole, setUsersByRole] = useState({})
+  const [dateRange, setDateRange] = useState(null)
+  const [archiveStatusFilter, setArchiveStatusFilter] = useState([])
 
   const loadAll = () => {
     api.get('/shipments').then((r) => {
@@ -110,6 +114,29 @@ export default function ShipmentsPage() {
     return allShipments.filter((s) => myStages.includes(s.stage))
   }, [allShipments, user])
 
+  // Arşiv durum seçenekleri (gerçek veriden)
+  const archiveStatusOptions = useMemo(() => {
+    const set = new Set()
+    allShipments.forEach((s) => {
+      if (s.is_archive && s.stage_label && s.stage_label !== '—') set.add(s.stage_label)
+    })
+    return Array.from(set).sort().map((v) => ({ value: v, label: v }))
+  }, [allShipments])
+
+  // Filter (date range + archive status)
+  const filteredShipments = useMemo(() => {
+    const fromDate = dateRange?.[0]?.format('YYYY-MM-DD')
+    const toDate = dateRange?.[1]?.format('YYYY-MM-DD')
+    const statusSet = archiveStatusFilter.length ? new Set(archiveStatusFilter) : null
+    return shipments.filter((s) => {
+      const dt = (s.created_at || '').slice(0, 10)
+      if (fromDate && dt && dt < fromDate) return false
+      if (toDate && dt && dt > toDate) return false
+      if (statusSet && s.is_archive && !statusSet.has(s.stage_label)) return false
+      return true
+    })
+  }, [shipments, dateRange, archiveStatusFilter])
+
   const isMyTurn = (shipment) => {
     if (!user) return false
     const myStages = MY_STAGES[user.role] || []
@@ -117,7 +144,15 @@ export default function ShipmentsPage() {
   }
 
   const columns = [
-    { title: 'Müşteri', dataIndex: 'customer_name', key: 'customer_name' },
+    {
+      title: 'Müşteri', dataIndex: 'customer_name', key: 'customer_name',
+      render: (v, r) => (
+        <Space size={6}>
+          <span>{v || '-'}</span>
+          {r.is_archive && <Tag color="blue" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>ARŞİV</Tag>}
+        </Space>
+      ),
+    },
     { title: 'Sipariş', dataIndex: 'tg_order_name', key: 'tg_order_name', render: (v) => v || '-' },
     { title: 'Sevk Şekli', dataIndex: 'delivery_type', key: 'delivery_type', render: (v) => v || '-' },
     {
@@ -155,7 +190,11 @@ export default function ShipmentsPage() {
       key: 'action',
       width: 80,
       render: (_, r) => (
-        <Button icon={<EyeOutlined />} size="small" onClick={() => navigate(`/shipments/${r.id}`)}>
+        <Button
+          icon={<EyeOutlined />}
+          size="small"
+          onClick={() => navigate(r.is_archive ? `/shipments/archive/${r.archive_id}` : `/shipments/${r.id}`)}
+        >
           Detay
         </Button>
       ),
@@ -232,8 +271,40 @@ export default function ShipmentsPage() {
           }))}
           style={{ marginBottom: 16 }}
         />
+
+        {/* Filtreler */}
+        <Space wrap style={{ marginBottom: 12 }}>
+          <span style={{ fontSize: 13, color: '#666' }}>Tarih:</span>
+          <RangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            format="DD.MM.YYYY"
+            allowClear
+            placeholder={['Başlangıç', 'Bitiş']}
+          />
+          <span style={{ fontSize: 13, color: '#666', marginLeft: 8 }}>Arşiv durum:</span>
+          <Select
+            mode="multiple"
+            value={archiveStatusFilter}
+            onChange={setArchiveStatusFilter}
+            options={archiveStatusOptions}
+            placeholder="Tümü"
+            allowClear
+            maxTagCount="responsive"
+            style={{ minWidth: 240 }}
+          />
+          {(dateRange || archiveStatusFilter.length > 0) && (
+            <Button icon={<ClearOutlined />} size="small" onClick={() => { setDateRange(null); setArchiveStatusFilter([]) }}>
+              Temizle
+            </Button>
+          )}
+          <span style={{ marginLeft: 8, color: '#888', fontSize: 12 }}>
+            {filteredShipments.length} / {shipments.length}
+          </span>
+        </Space>
+
         <Table
-          dataSource={shipments}
+          dataSource={filteredShipments}
           columns={columns}
           rowKey="id"
           loading={loading}

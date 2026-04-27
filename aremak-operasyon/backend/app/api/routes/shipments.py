@@ -108,17 +108,128 @@ def _shipment_to_dict(s: ShipmentRequest) -> dict:
 @router.get("")
 def list_shipments(
     stage: Optional[str] = Query(None),
+    include_archive: bool = Query(True),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     q = db.query(ShipmentRequest)
     if stage:
         q = q.filter(ShipmentRequest.stage == stage)
-    # Sales users only see their own shipments
     if current_user.role == "sales":
         q = q.filter(ShipmentRequest.created_by_id == current_user.id)
     shipments = q.order_by(ShipmentRequest.created_at.desc()).all()
-    return [_shipment_to_dict(s) for s in shipments]
+    items = [_shipment_to_dict(s) for s in shipments]
+
+    # Arşiv kayıtları (sales görmez — Knack arşivi sadece admin/warehouse için)
+    if include_archive and current_user.role != "sales":
+        from app.models.archive_shipment import ArchiveShipmentRequest
+        archives = db.query(ArchiveShipmentRequest).order_by(
+            ArchiveShipmentRequest.talep_tarihi.desc()
+        ).all()
+        for a in archives:
+            items.append({
+                "id": f"archive-{a.id}",
+                "archive_id": a.id,
+                "is_archive": True,
+                "customer_name": a.alici_adi,
+                "stage": "shipped" if (a.durum or "").lower().startswith("g") else "preparing",
+                "stage_label": a.durum or "—",
+                "delivery_type": a.teslim_sekli,
+                "cargo_company": a.kargo_firmalari,
+                "delivery_address": a.teslimat_adresi,
+                "recipient_name": a.alici_adi,
+                "recipient_phone": a.alici_telefon,
+                "planned_ship_date": a.planlanan_sevk_tarihi,
+                "tg_order_id": None,
+                "tg_order_name": a.irsaliye_adi,
+                "invoice_url": None,
+                "invoice_no": None,
+                "irsaliye_id": None,
+                "shipping_doc_type": a.gonderim_belgesi,
+                "notes": a.kontrol_notu,
+                "items": [],
+                "history": [],
+                "cargo_photo_urls": [],
+                "cargo_pdf_url": None,
+                "cargo_tracking_no": None,
+                "created_at": (a.talep_tarihi + "T00:00:00") if a.talep_tarihi else None,
+                "updated_at": None,
+                "created_by": None,
+                "assigned_to": None,
+            })
+    return items
+
+
+# ─── Arşiv Sevk Detayı ───────────────────────────────────────────────
+@router.get("/archive/{archive_id}")
+def get_archive_shipment(
+    archive_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.models.archive_shipment import ArchiveShipmentRequest
+    a = db.query(ArchiveShipmentRequest).filter(ArchiveShipmentRequest.id == archive_id).first()
+    if not a:
+        raise HTTPException(404, "Arşiv sevk talebi bulunamadı")
+
+    # Items
+    items = []
+    for it in a.items:
+        items.append({
+            "product_id": it.product_id,
+            "product_name": it.urun_adi,
+            "sku": it.urun_sku,
+            "quantity": it.adet,
+            "shelf": it.konum,
+        })
+
+    # Files — kategoriye göre grupla
+    files_by_cat: dict[str, list[dict]] = {}
+    for f in a.files:
+        cat = f.alan_adi or "Diğer"
+        files_by_cat.setdefault(cat, []).append({
+            "id": f.id,
+            "alan_adi": f.alan_adi,
+            "dosya_adi": f.dosya_adi,
+            "url": f.yerel_yol,
+            "size": f.boyut,
+        })
+
+    return {
+        "id": f"archive-{a.id}",
+        "archive_id": a.id,
+        "is_archive": True,
+        "knack_record_id": a.knack_record_id,
+        "talep_tarihi": a.talep_tarihi,
+        "sevk_tarihi": a.sevk_tarihi,
+        "planlanan_sevk_tarihi": a.planlanan_sevk_tarihi,
+        "talep_admini": a.talep_admini,
+        "sevk_sorumlusu": a.sevk_sorumlusu,
+        "ilgili_satisci": a.ilgili_satisci,
+        "alici_adi": a.alici_adi,
+        "alici_telefon": a.alici_telefon,
+        "durum": a.durum,
+        "sevk_yonu": a.sevk_yonu,
+        "gonderim_belgesi": a.gonderim_belgesi,
+        "teslim_sekli": a.teslim_sekli,
+        "kargo_firmalari": a.kargo_firmalari,
+        "teslimat_adresi": a.teslimat_adresi,
+        "arac_plakasi": a.arac_plakasi,
+        "sofor_ad_soyad": a.sofor_ad_soyad,
+        "fatura_para_birimi": a.fatura_para_birimi,
+        "fatura_kuru": a.fatura_kuru,
+        "odeme_durumu": a.odeme_durumu,
+        "odeme_tarihi": a.odeme_tarihi,
+        "kontrol_notu": a.kontrol_notu,
+        "sevk_sorumlusu_notu": a.sevk_sorumlusu_notu,
+        "irsaliye_notu": a.irsaliye_notu,
+        "fatura_notu": a.fatura_notu,
+        "kargo_icerigi": a.kargo_icerigi,
+        "irsaliye_adi": a.irsaliye_adi,
+        "items": items,
+        "files_by_category": files_by_cat,
+        "imported_at": a.imported_at.isoformat() if a.imported_at else None,
+    }
 
 
 @router.post("")

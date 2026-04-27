@@ -8,6 +8,7 @@ import ProductsPage from './pages/ProductsPage'
 import OrdersPage from './pages/OrdersPage'
 import ShipmentsPage from './pages/ShipmentsPage'
 import ShipmentDetailPage from './pages/ShipmentDetailPage'
+import ShipmentArchiveDetailPage from './pages/ShipmentArchiveDetailPage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import CustomerQueryPage from './pages/CustomerQueryPage'
 import CustomerNewPage from './pages/CustomerNewPage'
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="orders" element={<OrdersPage />} />
         <Route path="orders/:id" element={<OrderDetailPage />} />
         <Route path="shipments" element={<ShipmentsPage />} />
+        <Route path="shipments/archive/:id" element={<ShipmentArchiveDetailPage />} />
         <Route path="shipments/:id" element={<ShipmentDetailPage />} />
         <Route path="samples" element={<SampleRequestsPage />} />
         <Route path="samples/:id" element={<SampleDetailPage />} />
