@@ -104,6 +104,11 @@ export default function PurchaseOrderArchiveDetailPage() {
               <Descriptions.Item label="Sipariş No">{po.siparis_no || '-'}</Descriptions.Item>
               <Descriptions.Item label="Tedarikçi">{po.supplier?.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Sipariş Tarihi">{po.order_date || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Teslim Tarihi">
+                {po.delivery_date
+                  ? <span style={{ color: '#52c41a' }}>{po.delivery_date}</span>
+                  : '-'}
+              </Descriptions.Item>
               <Descriptions.Item label="Para Birimi">{po.currency || '-'}</Descriptions.Item>
               <Descriptions.Item label="Toplam (Knack)">
                 <Text strong>

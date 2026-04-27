@@ -14,6 +14,7 @@ class ArchivePurchaseOrder(Base):
     id = Column(Integer, primary_key=True, index=True)
     siparis_no = Column(String, index=True, nullable=True)             # Knack: Sipariş No
     order_date = Column(String, nullable=True)                          # YYYY-MM-DD
+    delivery_date = Column(String, nullable=True)                       # YYYY-MM-DD (item Teslim Alınma Tarihi'lerinin max'ı)
     supplier_name = Column(String, index=True, nullable=False)          # Knack: Tedarikçi Firma (raw)
     tg_party_id = Column(Integer, nullable=True, index=True)            # TG'deki tedarikçi ID (eşleşirse)
     total = Column(Float, nullable=True)
