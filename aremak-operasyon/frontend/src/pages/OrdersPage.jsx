@@ -167,9 +167,9 @@ export default function OrdersPage() {
 
   useEffect(() => {
     setLoading(true)
-    const params = statusFilter !== 'all' ? `&status=${statusFilter}` : ''
-    api.get(`/orders?page=1&pagesize=200&tree=true${params}`)
-      .then((r) => setData(r.data))
+    const params = statusFilter !== 'all' ? `?status=${statusFilter}` : ''
+    api.get(`/orders/tree${params}`)
+      .then((r) => setData({ List: r.data.items || [], OrderCount: r.data.count || 0 }))
       .finally(() => setLoading(false))
   }, [statusFilter])
 

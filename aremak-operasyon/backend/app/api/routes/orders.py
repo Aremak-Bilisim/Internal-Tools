@@ -76,6 +76,84 @@ async def list_orders(
     return {"OrderCount": data.get("OrderCount", 0), "List": roots}
 
 
+@router.get("/tree")
+async def list_orders_tree(
+    status: Optional[str] = Query(None),  # open | closed | None(all)
+    current_user=Depends(get_current_user),
+):
+    """Müşteri siparişlerini parent-child tree yapısında döner.
+    TG split parent'ları Index list'inde görünmüyor — her sipariş detayını çekip ParentSale.Id ile tree oluşturuyoruz.
+    Eksik parent'lar ayrıca detayla çekilir."""
+    import asyncio
+    data = await teamgram.get_orders(page=1, pagesize=200, status=status)
+    list_rows = data.get("List") or []
+
+    # Detayları paralel çek (IsSplit, ParentSale, Items vs için)
+    detail_tasks = [teamgram.get_order(o.get("Id")) for o in list_rows if o.get("Id")]
+    details = await asyncio.gather(*detail_tasks, return_exceptions=True)
+
+    by_id: dict[int, dict] = {}
+    parent_ids_needed: set[int] = set()
+
+    def _row(d: dict) -> dict:
+        # TG raw field'larini koruyoruz, ek olarak frontend icin parent_id/is_split/children
+        parent_sale = d.get("ParentSale") or {}
+        try:
+            parent_id = int(parent_sale.get("Id")) if parent_sale.get("Id") else None
+        except (TypeError, ValueError):
+            parent_id = None
+        # Index ile uyumlu duzgun bir minimal subset don
+        return {
+            "Id": d.get("Id"),
+            "Name": d.get("Name"),
+            "Displayname": d.get("Displayname"),
+            "OrderDate": d.get("OrderDate"),
+            "ScheduledFulfilment": d.get("ScheduledFulfilment"),
+            "Status": d.get("Status"),
+            "CustomStageName": d.get("CustomStageName"),
+            "DiscountedTotal": d.get("DiscountedTotal"),
+            "CurrencyName": d.get("CurrencyName"),
+            "RelatedEntity": d.get("RelatedEntity"),
+            "HasInvoice": bool(d.get("HasInvoice")),
+            # Tree icin
+            "is_split": bool(d.get("IsSplit")),
+            "parent_id": parent_id,
+            "children": [],
+        }
+
+    for d in details:
+        if isinstance(d, dict) and d.get("Id"):
+            row = _row(d)
+            by_id[row["id"]] = row
+            if row["parent_id"] and row["parent_id"] not in by_id:
+                parent_ids_needed.add(row["parent_id"])
+
+    # Eksik parent'ları çek
+    parent_ids_needed -= set(by_id.keys())
+    if parent_ids_needed:
+        parent_tasks = [teamgram.get_order(pid) for pid in parent_ids_needed]
+        parent_details = await asyncio.gather(*parent_tasks, return_exceptions=True)
+        for d in parent_details:
+            if isinstance(d, dict) and d.get("Id"):
+                row = _row(d)
+                by_id[row["id"]] = row
+
+    # Ağaç kur
+    roots = []
+    for it in by_id.values():
+        pid = it.get("parent_id")
+        if pid and pid in by_id:
+            by_id[pid]["children"].append(it)
+        else:
+            roots.append(it)
+
+    for it in by_id.values():
+        if not it["children"]:
+            it.pop("children", None)
+
+    return {"items": roots, "count": len(roots)}
+
+
 @router.get("/{order_id}")
 async def get_order(order_id: int, current_user=Depends(get_current_user)):
     return await teamgram.get_order(order_id)
