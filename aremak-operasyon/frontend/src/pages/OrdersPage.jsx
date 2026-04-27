@@ -203,7 +203,16 @@ export default function OrdersPage() {
   }
 
   useEffect(() => {
-    const orders = data.List || []
+    // Tree'yi flat'le — fatura eşleştirme child'ları da kapsasın
+    const flatten = (rows) => {
+      const out = []
+      for (const r of rows || []) {
+        out.push(r)
+        if (r.children) out.push(...flatten(r.children))
+      }
+      return out
+    }
+    const orders = flatten(data.List || [])
     const hasInvoiceData = Object.keys(invoiceMap).length || Object.keys(invoiceTaxMap).length
     if (!orders.length || !hasInvoiceData) { setOrderInvoiceMap({}); return }
 
