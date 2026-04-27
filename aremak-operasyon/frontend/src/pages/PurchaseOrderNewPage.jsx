@@ -167,6 +167,13 @@ export default function PurchaseOrderNewPage() {
       ),
     },
     {
+      title: 'Tutar (USD)', key: 'line_total', width: 110,
+      render: (_, it) => {
+        const lt = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0)
+        return <Text strong>{lt.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+      },
+    },
+    {
       title: 'TG Eşleşme', key: 'match', width: 280,
       render: (_, it, idx) => (
         it.match ? (
@@ -233,9 +240,13 @@ export default function PurchaseOrderNewPage() {
               <Descriptions.Item label="İlgili Kişi">Sun Zhiping</Descriptions.Item>
               <Descriptions.Item label="PO No">{parsed.po_no || '-'}</Descriptions.Item>
               <Descriptions.Item label="Para Birimi">{parsed.currency}</Descriptions.Item>
-              <Descriptions.Item label="Toplam Adet">{parsed.total_quantity}</Descriptions.Item>
-              <Descriptions.Item label="Toplam Tutar">
-                {parsed.total_amount?.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {parsed.currency}
+              <Descriptions.Item label="PDF Toplam Adet">
+                {parsed.doc_total_quantity?.toLocaleString('tr-TR') ?? '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="PDF Toplam Tutar">
+                {parsed.doc_total_amount != null
+                  ? `${parsed.doc_total_amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${parsed.currency}`
+                  : '-'}
               </Descriptions.Item>
               <Descriptions.Item label="Aşama">Üretim Bekliyor</Descriptions.Item>
               <Descriptions.Item label="Durum">Talep Edildi</Descriptions.Item>
@@ -270,13 +281,70 @@ export default function PurchaseOrderNewPage() {
               )
             }
           >
-            <Table
-              dataSource={items}
-              columns={itemColumns}
-              rowKey={(_, i) => i}
-              pagination={false}
-              size="small"
-            />
+            {(() => {
+              const calcQty = items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+              const calcAmount = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0)
+              const docQty = parsed.doc_total_quantity
+              const docAmount = parsed.doc_total_amount
+              const qtyMismatch = docQty != null && Math.abs(calcQty - docQty) > 0.001
+              const amountMismatch = docAmount != null && Math.abs(calcAmount - docAmount) > 0.01
+              const mismatch = qtyMismatch || amountMismatch
+              return (
+                <>
+                  <Table
+                    dataSource={items}
+                    columns={itemColumns}
+                    rowKey={(_, i) => i}
+                    pagination={false}
+                    size="small"
+                    summary={() => (
+                      <Table.Summary fixed>
+                        <Table.Summary.Row style={{ background: '#fafafa' }}>
+                          <Table.Summary.Cell index={0} colSpan={2}>
+                            <Text strong>TOPLAM</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={2}>
+                            <Text strong>{calcQty.toLocaleString('tr-TR')}</Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={3} />
+                          <Table.Summary.Cell index={4}>
+                            <Text strong>
+                              {calcAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                            </Text>
+                          </Table.Summary.Cell>
+                          <Table.Summary.Cell index={5} />
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    )}
+                  />
+
+                  {(docQty != null || docAmount != null) && (
+                    <Alert
+                      style={{ marginTop: 12 }}
+                      type={mismatch ? 'error' : 'success'}
+                      showIcon
+                      message={
+                        mismatch
+                          ? 'Hesaplanan toplam PDF\'teki TOTAL satırıyla uyuşmuyor — parse hatası olabilir'
+                          : 'Hesaplanan toplam PDF\'teki TOTAL ile uyuşuyor'
+                      }
+                      description={
+                        <div style={{ fontSize: 12 }}>
+                          <div>
+                            <strong>Adet:</strong> hesap {calcQty.toLocaleString('tr-TR')} ↔ PDF {docQty?.toLocaleString('tr-TR') ?? '-'}
+                            {qtyMismatch && <Tag color="red" style={{ marginLeft: 8 }}>Fark: {(calcQty - docQty).toFixed(2)}</Tag>}
+                          </div>
+                          <div>
+                            <strong>Tutar:</strong> hesap {calcAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} USD ↔ PDF {docAmount?.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) ?? '-'} USD
+                            {amountMismatch && <Tag color="red" style={{ marginLeft: 8 }}>Fark: {(calcAmount - docAmount).toFixed(2)}</Tag>}
+                          </div>
+                        </div>
+                      }
+                    />
+                  )}
+                </>
+              )
+            })()}
           </Card>
 
           {/* Aksiyonlar */}

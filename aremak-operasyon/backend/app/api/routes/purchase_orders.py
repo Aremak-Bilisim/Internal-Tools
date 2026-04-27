@@ -76,8 +76,8 @@ async def parse_pdf(
         "supplier": parsed["supplier"],
         "po_no": parsed["po_no"],
         "currency": parsed["currency"],
-        "total_quantity": parsed["total_quantity"],
-        "total_amount": parsed["total_amount"],
+        "doc_total_quantity": parsed.get("doc_total_quantity"),
+        "doc_total_amount": parsed.get("doc_total_amount"),
         "items": enriched_items,
     }
 

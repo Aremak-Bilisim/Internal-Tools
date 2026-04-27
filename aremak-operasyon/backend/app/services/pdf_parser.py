@@ -111,14 +111,28 @@ def parse_proforma(file_bytes: bytes) -> dict:
     # Para birimi (Amount(USD) ipucu) — varsayılan USD
     currency = "USD" if "USD" in full_text else "USD"
 
-    total_qty = sum(it["quantity"] for it in items if it.get("quantity") is not None)
-    total_amount = sum(it["amount"] for it in items if it.get("amount") is not None)
+    # PDF'teki TOTAL satırından beyan edilen toplamları çıkar
+    # Örnek: "TOTAL 245 15404.00 USD"
+    doc_total_qty = None
+    doc_total_amount = None
+    tm = re.search(r"TOTAL\s+([\d,\.]+)\s+([\d,\.]+)", full_text, re.IGNORECASE)
+    if tm:
+        doc_total_qty = _to_float(tm.group(1))
+        doc_total_amount = _to_float(tm.group(2))
+
+    items_total_qty = sum(it["quantity"] for it in items if it.get("quantity") is not None)
+    items_total_amount = sum(it["amount"] for it in items if it.get("amount") is not None)
 
     return {
         "supplier": detect_supplier(full_text),
         "po_no": po_no,
         "items": items,
-        "total_quantity": total_qty,
-        "total_amount": total_amount,
+        "items_total_quantity": items_total_qty,
+        "items_total_amount": items_total_amount,
+        "doc_total_quantity": doc_total_qty,        # PDF'in TOTAL satırından
+        "doc_total_amount": doc_total_amount,       # PDF'in TOTAL satırından
+        # Backwards-compat
+        "total_quantity": items_total_qty,
+        "total_amount": items_total_amount,
         "currency": currency,
     }
