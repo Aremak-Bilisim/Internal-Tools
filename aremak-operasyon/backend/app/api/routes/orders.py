@@ -124,7 +124,7 @@ async def list_orders_tree(
     for d in details:
         if isinstance(d, dict) and d.get("Id"):
             row = _row(d)
-            by_id[row["id"]] = row
+            by_id[row["Id"]] = row
             if row["parent_id"] and row["parent_id"] not in by_id:
                 parent_ids_needed.add(row["parent_id"])
 
@@ -136,7 +136,7 @@ async def list_orders_tree(
         for d in parent_details:
             if isinstance(d, dict) and d.get("Id"):
                 row = _row(d)
-                by_id[row["id"]] = row
+                by_id[row["Id"]] = row
 
     # Ağaç kur
     roots = []
