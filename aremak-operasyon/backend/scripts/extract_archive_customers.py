@@ -67,27 +67,49 @@ def is_skip(line: str) -> bool:
     return False
 
 
+COMPANY_SUFFIX_RE = re.compile(
+    r"\b(LTD|ŞT[İI]|A\.?Ş\.?|AS\b|TİC|TIC|SAN|ANONİM|LİMİTED|LIMITED|INC|GMBH|VAKFI|DERNEĞİ|ÜNİVERSİTESİ|KOOP)",
+    re.IGNORECASE,
+)
+ADDRESS_HINT_RE = re.compile(
+    r"\b(MAH\.?|CAD\.?|CADDE|SOK\.?|SOKAK|BLV\.?|BULV\.?|NO\s*:|KAT\s*:|D\s*:|İLÇE|ŞEHİR|POSTA|VKN|VERG[İI]|TCKN|MERSİS|KEP|TEL\b|FAX|GSM)",
+    re.IGNORECASE,
+)
+
+
 def extract_customer_from_text(text: str) -> str | None:
-    """PDF text'inden müşteri adı çıkarmaya çalış."""
+    """PDF text'inden müşteri adı çıkarmaya çalış (multi-line birleştirme dahil)."""
     if not text:
         return None
-    # Header'lar arasından bir tane bul, sonrasında ilk anlamlı satırı al
     for pat in HEADER_PATTERNS:
         m = re.search(pat, text, flags=re.IGNORECASE)
         if not m:
             continue
         after = text[m.end():m.end() + 600]
-        for line in after.split("\n"):
-            cand = line.strip()
-            if not cand:
+        lines = [l.strip() for l in after.split("\n")]
+        # İlk anlamlı satırı bul
+        idx0 = None
+        for i, line in enumerate(lines):
+            if not line or is_skip(line) or len(line) > 120:
                 continue
-            if is_skip(cand):
-                continue
-            # Çok uzun adres parçalarını filtrele
-            if len(cand) > 120:
-                continue
-            # İlk geçerli satırı müşteri kabul et
-            return cand[:200]
+            idx0 = i
+            break
+        if idx0 is None:
+            continue
+        result = lines[idx0]
+        # Sonraki 1-2 satırı kontrol et — şirket suffix devamı mı?
+        for j in range(idx0 + 1, min(idx0 + 3, len(lines))):
+            nxt = lines[j]
+            if not nxt:
+                break
+            if ADDRESS_HINT_RE.search(nxt):
+                break  # adres satırı geldi, dur
+            if COMPANY_SUFFIX_RE.search(nxt) and len(nxt) <= 80:
+                # Devam eden şirket adı satırı
+                result = (result + " " + nxt).strip()
+            else:
+                break
+        return result[:200]
     return None
 
 
