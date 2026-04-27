@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import {
-  Card, Upload, Button, Typography, Space, Spin, message, Table, Tag, Input,
+  Card, Upload, Button, Typography, Space, Spin, message, Table, Tag, Input, InputNumber,
   Descriptions, Select, Form, Modal, Alert,
 } from 'antd'
 import { InboxOutlined, FilePdfOutlined, CheckCircleOutlined, CloseCircleOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons'
@@ -153,15 +153,16 @@ export default function PurchaseOrderNewPage() {
       ),
     },
     {
-      title: 'Birim Fiyat (USD)', dataIndex: 'unit_price', key: 'unit_price', width: 120,
+      title: 'Birim Fiyat (USD)', dataIndex: 'unit_price', key: 'unit_price', width: 130,
       render: (v, _, idx) => (
-        <Input
+        <InputNumber
           size="small"
-          type="number"
           value={v}
-          style={{ width: 100 }}
-          step="0.01"
-          onChange={(e) => updateItemField(idx, 'unit_price', parseFloat(e.target.value) || 0)}
+          style={{ width: 110 }}
+          precision={2}
+          step={0.01}
+          min={0}
+          onChange={(val) => updateItemField(idx, 'unit_price', val ?? 0)}
         />
       ),
     },
