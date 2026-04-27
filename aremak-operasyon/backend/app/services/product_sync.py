@@ -44,6 +44,23 @@ def _product_to_dict(p: dict, parent_map: dict) -> dict:
 
     cfs = {cf["CustomFieldId"]: cf.get("Value") for cf in (p.get("CustomFieldDatas") or [])}
 
+    def _cf_label(raw):
+        """Select tipi CF'lerin Value'su JSON ({"Id":..., "Value":"label"})."""
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s:
+            return None
+        if s.startswith("{"):
+            try:
+                import json as _json
+                obj = _json.loads(s)
+                if isinstance(obj, dict):
+                    return obj.get("Value") or obj.get("Label") or None
+            except Exception:
+                pass
+        return s
+
     return {
         "tg_id": p["Id"],
         "brand": p.get("Brand"),
@@ -65,7 +82,7 @@ def _product_to_dict(p: dict, parent_map: dict) -> dict:
         "details": p.get("Details"),
         "not_available": bool(p.get("NotAvaliable")),
         "datasheet_url": cfs.get(CF_DATASHEET) or None,
-        "shelf": (cfs.get(CF_SHELF) or "").strip() or None,
+        "shelf": _cf_label(cfs.get(CF_SHELF)),
     }
 
 
