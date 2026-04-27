@@ -67,11 +67,25 @@ export default function PurchaseOrderNewPage() {
     }
   }
 
-  const pickMatch = (matchObj) => {
+  const pickMatch = async (matchObj) => {
     if (!searchModal) return
     const idx = searchModal.index
+    const pdfName = items[idx]?.product_name
     setItems((prev) => prev.map((it, i) => i === idx ? { ...it, match: matchObj } : it))
     setSearchModal(null)
+
+    // Sonraki PDF'lerde otomatik bulunabilsin diye kaydet
+    if (pdfName) {
+      try {
+        await api.post('/purchase-orders/match', {
+          pdf_name: pdfName,
+          product_id: matchObj.id,
+        })
+        message.success('Eşleşme kaydedildi (sonraki PDF\'lerde hatırlanacak)', 2)
+      } catch {
+        // Sessiz fail — UI eşleşmeyi gösterir, sadece kalıcı kayıt başarısız
+      }
+    }
   }
 
   const clearMatch = (idx) => {

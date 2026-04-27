@@ -11,7 +11,18 @@ from pydantic import BaseModel
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.product import Product
+from app.models.purchase_match import PurchaseMatch
 from app.services import pdf_parser, teamgram
+
+
+def _normalize_pdf_name(name: str) -> str:
+    """PDF adını eşleştirme amacıyla normalize eder (lowercase, fazla boşluk temizleme)."""
+    if not name:
+        return ""
+    import re
+    s = name.strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 router = APIRouter()
 
@@ -86,6 +97,7 @@ def _match_product(db: Session, raw_name: str) -> Optional[Product]:
     """
     PDF'teki ürün adıyla lokal Product tablosunda eşleşme arar.
     Strateji:
+      0. Önceden kaydedilmiş manuel eşleşme (purchase_matches tablosu)
       1. Tam prod_model eşleşmesi
       2. Prod_model substring (case-insensitive)
       3. SKU substring
@@ -93,6 +105,14 @@ def _match_product(db: Session, raw_name: str) -> Optional[Product]:
     if not raw_name:
         return None
     name = raw_name.strip()
+
+    # 0. Cache lookup
+    norm = _normalize_pdf_name(name)
+    cached = db.query(PurchaseMatch).filter(PurchaseMatch.pdf_name_norm == norm).first()
+    if cached:
+        p = db.query(Product).filter(Product.id == cached.product_id).first()
+        if p:
+            return p
 
     # 1. Tam prod_model eşleşmesi
     p = db.query(Product).filter(Product.prod_model.ilike(name)).first()
@@ -144,6 +164,43 @@ def search_products(
         )
     ).limit(20).all()
     return [_product_to_match_dict(p) for p in rows]
+
+
+# ─── Manuel Eşleşmeyi Kaydet (gelecek PDF'ler için) ──────────────────
+class SaveMatchIn(BaseModel):
+    pdf_name: str
+    product_id: int
+
+
+@router.post("/match")
+def save_match(
+    data: SaveMatchIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """PDF adı → ürün eşleşmesini kaydeder. Aynı pdf_name varsa günceller."""
+    norm = _normalize_pdf_name(data.pdf_name)
+    if not norm:
+        raise HTTPException(400, "PDF adı boş")
+
+    # Ürün var mı kontrolü
+    p = db.query(Product).filter(Product.id == data.product_id).first()
+    if not p:
+        raise HTTPException(404, "Ürün bulunamadı")
+
+    existing = db.query(PurchaseMatch).filter(PurchaseMatch.pdf_name_norm == norm).first()
+    if existing:
+        existing.product_id = data.product_id
+        existing.pdf_name_raw = data.pdf_name
+    else:
+        existing = PurchaseMatch(
+            pdf_name_norm=norm,
+            pdf_name_raw=data.pdf_name,
+            product_id=data.product_id,
+        )
+        db.add(existing)
+    db.commit()
+    return {"ok": True, "id": existing.id}
 
 
 # ─── TG'de Sipariş Oluştur ───────────────────────────────────────────
