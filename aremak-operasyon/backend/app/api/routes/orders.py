@@ -88,9 +88,18 @@ async def list_orders_tree(
     data = await teamgram.get_orders(page=1, pagesize=200, status=status)
     list_rows = data.get("List") or []
 
-    # Detayları paralel çek (IsSplit, ParentSale, Items vs için)
-    detail_tasks = [teamgram.get_order(o.get("Id")) for o in list_rows if o.get("Id")]
-    details = await asyncio.gather(*detail_tasks, return_exceptions=True)
+    # TG rate limit (3/sn). Sequential limit ile çekiyoruz — 5 paralel max
+    sem = asyncio.Semaphore(5)
+
+    async def fetch(oid):
+        async with sem:
+            try:
+                return await teamgram.get_order(oid)
+            except Exception as e:
+                return e
+
+    detail_tasks = [fetch(o.get("Id")) for o in list_rows if o.get("Id")]
+    details = await asyncio.gather(*detail_tasks)
 
     by_id: dict[int, dict] = {}
     parent_ids_needed: set[int] = set()
@@ -128,11 +137,11 @@ async def list_orders_tree(
             if row["parent_id"] and row["parent_id"] not in by_id:
                 parent_ids_needed.add(row["parent_id"])
 
-    # Eksik parent'ları çek
+    # Eksik parent'ları çek (semaphore ile)
     parent_ids_needed -= set(by_id.keys())
     if parent_ids_needed:
-        parent_tasks = [teamgram.get_order(pid) for pid in parent_ids_needed]
-        parent_details = await asyncio.gather(*parent_tasks, return_exceptions=True)
+        parent_tasks = [fetch(pid) for pid in parent_ids_needed]
+        parent_details = await asyncio.gather(*parent_tasks)
         for d in parent_details:
             if isinstance(d, dict) and d.get("Id"):
                 row = _row(d)
