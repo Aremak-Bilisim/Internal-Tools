@@ -152,22 +152,41 @@ def extract_customer_from_pdf(pdf) -> str | None:
     if header_line_idx is None:
         return _fallback_heuristic(full_text, header_match)
 
-    # Header satırının altındaki BOLD satırları topla
+    # Header satırının altındaki BOLD satırları topla — multi-column layout için
+    # tolerant: label satırlarını (Vergi No, Mersis, vs.) atla, address keyword'lerinde dur
+    LABEL_RE = re.compile(r"^\s*(VERG[İI]\s*NO|VKN|TCKN|MERS[İI]S|T[İI]CARET\s*S[İI]C[İI]L|ADRES|TEL|FAX|E-?POSTA|E-?MAIL|KEP|FATURA\s*NO|TAR[İI]H|SENARYO)\s*[:.]?\s*$", re.IGNORECASE)
+
     bold_lines = []
-    for i in range(header_line_idx + 1, min(header_line_idx + 8, len(lines))):
+    consecutive_non_bold = 0
+    for i in range(header_line_idx + 1, min(header_line_idx + 15, len(lines))):
         ln = lines[i]
         if not ln:
             continue
         line_text = "".join(c.get("text", "") for c in ln).strip()
-        if not line_text or is_skip(line_text):
+        if not line_text:
             continue
-        # Çoğunluk bold mu? (>%50)
+
+        # Label satırları (Vergi No, Mersis, vs.) — atla
+        if LABEL_RE.match(line_text):
+            continue
+        # Adres anahtar kelimeleri = bitmek üzere
+        if ADDRESS_HINT_RE.search(line_text):
+            break
+
         bold_count = sum(1 for c in ln if _is_bold(c.get("fontname", "")))
         is_bold_line = bold_count >= max(1, len(ln) * 0.5)
+
         if is_bold_line:
+            consecutive_non_bold = 0
+            # Skip-able içerik kontrolü (label gibi)
+            if is_skip(line_text):
+                continue
             bold_lines.append(line_text)
         else:
-            break  # bold bitti = adres başladı
+            consecutive_non_bold += 1
+            if consecutive_non_bold >= 3:
+                break  # 3 ardışık non-bold = isim bitti
+            # Bold değil ama satır kısa ve label gibi değilse de yine geç
 
     if bold_lines:
         result = " ".join(bold_lines).strip()
