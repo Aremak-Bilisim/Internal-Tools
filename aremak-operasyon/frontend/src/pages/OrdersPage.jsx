@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Table, Card, Tag, Typography, Button, Segmented, Tooltip, message,
+  Table, Card, Tag, Typography, Button, Segmented, Tooltip, message, Space,
   Drawer, Form, Input, InputNumber, Select, DatePicker, Row, Col, Spin, Upload,
 } from 'antd'
 import { FilePdfOutlined, ReloadOutlined, SendOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons'
@@ -168,7 +168,7 @@ export default function OrdersPage() {
   useEffect(() => {
     setLoading(true)
     const params = statusFilter !== 'all' ? `&status=${statusFilter}` : ''
-    api.get(`/orders?page=1&pagesize=200${params}`)
+    api.get(`/orders?page=1&pagesize=200&tree=true${params}`)
       .then((r) => setData(r.data))
       .finally(() => setLoading(false))
   }, [statusFilter])
@@ -499,16 +499,20 @@ export default function OrdersPage() {
       key: 'name',
       sorter: (a, b) => (a.Displayname || '').localeCompare(b.Displayname || '', 'tr'),
       render: (v, r) => (
-        <a
-          href="#"
-          onClick={async (e) => {
-            e.preventDefault()
-            const res = await api.get(`/orders/${r.Id}/weblink`)
-            window.open(res.data.url, '_blank')
-          }}
-        >
-          {v}
-        </a>
+        <Space size={6}>
+          {r.parent_id && <span style={{ color: '#bfbfbf', fontSize: 14, marginRight: 4 }}>└</span>}
+          <a
+            href="#"
+            onClick={async (e) => {
+              e.preventDefault()
+              const res = await api.get(`/orders/${r.Id}/weblink`)
+              window.open(res.data.url, '_blank')
+            }}
+          >
+            {v}
+          </a>
+          {r.is_split && <Tag color="purple" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>BÖLÜNDÜ</Tag>}
+        </Space>
       ),
     },
     {
@@ -709,6 +713,7 @@ export default function OrdersPage() {
           }}
           scroll={{ x: 1200 }}
           size="middle"
+          expandable={{ defaultExpandAllRows: true, indentSize: 48 }}
         />
       </Card>
 

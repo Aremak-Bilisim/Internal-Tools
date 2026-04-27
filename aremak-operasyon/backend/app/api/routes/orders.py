@@ -23,9 +23,57 @@ async def list_orders(
     page: int = Query(1, ge=1),
     pagesize: int = Query(50, ge=1, le=200),
     status: Optional[str] = Query(None),  # open | closed | None(all)
+    tree: bool = Query(False),
     current_user=Depends(get_current_user),
 ):
-    return await teamgram.get_orders(page=page, pagesize=pagesize, status=status)
+    """
+    tree=False (default): Eski davranış — düz List döner.
+    tree=True: Her order için ParentSale + IsSplit bilgisi eklenir,
+              parent altında children dizisinde döner.
+    """
+    import asyncio
+    data = await teamgram.get_orders(page=page, pagesize=pagesize, status=status)
+    if not tree:
+        return data
+
+    list_rows = data.get("List") or []
+    if not list_rows:
+        return {"OrderCount": data.get("OrderCount", 0), "List": []}
+
+    # Her order için detay çek (paralel)
+    detail_tasks = [teamgram.get_order(o.get("Id")) for o in list_rows if o.get("Id")]
+    details = await asyncio.gather(*detail_tasks, return_exceptions=True)
+
+    by_id = {}
+    for o, d in zip(list_rows, details):
+        is_split = False
+        parent_id = None
+        if isinstance(d, dict):
+            is_split = bool(d.get("IsSplit"))
+            ps = d.get("ParentSale") or {}
+            try:
+                parent_id = int(ps.get("Id")) if ps.get("Id") else None
+            except (TypeError, ValueError):
+                parent_id = None
+        by_id[o.get("Id")] = {
+            **o,
+            "is_split": is_split,
+            "parent_id": parent_id,
+            "children": [],
+        }
+
+    roots = []
+    for it in by_id.values():
+        pid = it.get("parent_id")
+        if pid and pid in by_id:
+            by_id[pid]["children"].append(it)
+        else:
+            roots.append(it)
+    for it in by_id.values():
+        if not it["children"]:
+            it.pop("children", None)
+
+    return {"OrderCount": data.get("OrderCount", 0), "List": roots}
 
 
 @router.get("/{order_id}")
