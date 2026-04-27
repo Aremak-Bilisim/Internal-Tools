@@ -128,14 +128,17 @@ def extract_customer_from_pdf(pdf) -> str | None:
         return _fallback_heuristic(full_text, header_match)
 
     # Header'ın PDF'teki Y pozisyonunu yaklaşık tahmin
-    # Char'ları satır-bazlı grupla (y koordinatı +/- 2)
+    # Char'ları satır-bazlı grupla (y koordinatı). pdfplumber'da top: sayfa üstü=0
     lines: list[list[dict]] = []
-    sorted_chars = sorted(chars, key=lambda c: (-c.get("top", 0), c.get("x0", 0)))
+    sorted_chars = sorted(chars, key=lambda c: (c.get("top", 0), c.get("x0", 0)))
     for c in sorted_chars:
         if not lines or abs(c.get("top", 0) - lines[-1][0].get("top", 0)) > 3:
             lines.append([c])
         else:
             lines[-1].append(c)
+    # Her satırı x0'a göre tekrar sırala (line içindeki char'lar sıralı olsun)
+    for ln in lines:
+        ln.sort(key=lambda c: c.get("x0", 0))
 
     # Header'ın bulunduğu satırı bul
     header_kw = [p.split("\\")[0].rstrip("[\\:s*").upper()[:6] for p in HEADER_PATTERNS]
