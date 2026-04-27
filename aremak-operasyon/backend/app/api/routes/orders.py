@@ -333,14 +333,19 @@ async def split_order(
         "CurrencyName": currency,
     }
 
+    HAZIRLANIYOR_STAGE_ID = 196782
+    TEDARIK_BEKLENIYOR_STAGE_ID = 196781
+
     in_stock_payload = {
         **common,
         "Name": f"{parent_name} - Hemen Sevk",
+        "CustomStageId": HAZIRLANIYOR_STAGE_ID,
         "Items": [_build_order_item(it, q) for it, q in in_stock_items],
     }
     waiting_payload = {
         **common,
         "Name": f"{parent_name} - Tedarik Bekliyor",
+        "CustomStageId": TEDARIK_BEKLENIYOR_STAGE_ID,
         "Items": [_build_order_item(it, q) for it, q in waiting_items],
     }
 
