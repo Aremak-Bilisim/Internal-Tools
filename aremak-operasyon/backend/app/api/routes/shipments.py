@@ -121,9 +121,12 @@ def list_shipments(
     items = [_shipment_to_dict(s) for s in shipments]
 
     # Arşiv kayıtları (sales görmez — Knack arşivi sadece admin/warehouse için)
+    # Sadece "Giden" sevk yönündekileri göster (gelen sevkler ayrı bir konu)
     if include_archive and current_user.role != "sales":
         from app.models.archive_shipment import ArchiveShipmentRequest
-        archives = db.query(ArchiveShipmentRequest).order_by(
+        archives = db.query(ArchiveShipmentRequest).filter(
+            ArchiveShipmentRequest.sevk_yonu == "Giden"
+        ).order_by(
             ArchiveShipmentRequest.talep_tarihi.desc()
         ).all()
         def _clean_placeholder(v):
