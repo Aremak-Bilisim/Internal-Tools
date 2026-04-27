@@ -197,11 +197,15 @@ async def get_purchase(purchase_id: int) -> dict:
 async def create_purchase(payload: dict) -> dict:
     """
     Yeni tedarikçi siparişi oluşturur.
-    payload örneği için PURCHASE_CREATE_TEMPLATE'e bak.
+    DİKKAT: TG, ASCII-escape'li JSON'da Türkçe karakteri '?' yapıyor.
+    Bu yüzden manuel UTF-8 byte gönderiyoruz + charset=utf-8 header.
     """
+    import json as _json
     url = f"{BASE}/{DOMAIN}/Purchases/Create"
+    body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(url, headers=HEADERS, json=payload)
+        r = await client.post(url, headers=headers, content=body)
         r.raise_for_status()
         return r.json()
 
