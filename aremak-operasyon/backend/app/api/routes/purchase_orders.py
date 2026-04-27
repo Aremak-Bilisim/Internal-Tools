@@ -14,6 +14,7 @@ from app.models.product import Product
 from app.models.purchase_match import PurchaseMatch
 from app.models.purchase_document import PurchaseDocument
 from app.models.purchase_receipt_document import PurchaseReceiptDocument
+from app.models.archive_purchase import ArchivePurchaseOrder, ArchivePurchaseItem
 from app.services import pdf_parser, excel_parser, teamgram
 
 import os
@@ -152,6 +153,36 @@ async def list_purchase_orders(
     for it in by_id.values():
         if not it["children"]:
             it.pop("children", None)
+
+    # ── Arşiv kayıtlarını ekle ──
+    archives = db.query(ArchivePurchaseOrder).order_by(ArchivePurchaseOrder.order_date.desc()).all()
+    for a in archives:
+        roots.append({
+            "id": f"archive-{a.id}",          # archive prefix — TG ID'leriyle çakışmaz
+            "archive_id": a.id,
+            "is_archive": True,
+            "name": a.siparis_no or f"Arşiv #{a.id}",
+            "displayname": a.siparis_no,
+            "order_date": a.order_date,
+            "delivery_date": None,
+            "scheduled_delivery_date": None,
+            "stage_name": "Teslim Alındı" if a.is_received else "Bekleniyor",
+            "status": 1 if a.is_received else 0,
+            "total": a.total,
+            "currency": a.currency,
+            "supplier": a.supplier_name,
+            "modified_date": None,
+            "tg_url": (
+                f"https://www.teamgram.com/aremak/parties/show?id={a.tg_party_id}"
+                if a.tg_party_id else None
+            ),
+            "document_url": a.knack_pdf_url,
+            "document_name": "Knack PDF" if a.knack_pdf_url else None,
+            "receipt_url": None,
+            "receipt_name": None,
+            "is_split": False,
+            "parent_id": None,
+        })
 
     return {"items": roots, "count": len(roots)}
 
@@ -668,6 +699,55 @@ async def confirm_receipt(
         "mode": "partial",
         "received_purchase_id": received_id,
         "remaining_purchase_id": remaining_id,
+    }
+
+
+# ─── Arşiv Detayı ────────────────────────────────────────────────────
+@router.get("/archive/{archive_id}")
+async def get_archive_purchase(
+    archive_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Knack arşiv siparişinin detayı."""
+    a = db.query(ArchivePurchaseOrder).filter(ArchivePurchaseOrder.id == archive_id).first()
+    if not a:
+        raise HTTPException(404, "Arşiv sipariş bulunamadı")
+
+    items = []
+    for it in a.items:
+        prod = db.query(Product).filter(Product.id == it.product_id).first() if it.product_id else None
+        items.append({
+            "product_id": it.product_id,
+            "product_name": it.product_name,
+            "matched_displayname": (f"{prod.brand or ''} - {prod.prod_model or ''}".strip(" -")) if prod else None,
+            "matched_sku": prod.sku if prod else None,
+            "quantity": it.quantity,
+            "line_total": it.line_total,
+            "currency": a.currency,
+        })
+
+    return {
+        "id": f"archive-{a.id}",
+        "archive_id": a.id,
+        "is_archive": True,
+        "siparis_no": a.siparis_no,
+        "name": a.siparis_no,
+        "order_date": a.order_date,
+        "supplier": {"id": a.tg_party_id, "name": a.supplier_name},
+        "total": a.total,
+        "currency": a.currency,
+        "is_received": a.is_received,
+        "status": 1 if a.is_received else 0,
+        "stage_name": "Teslim Alındı" if a.is_received else "Bekleniyor",
+        "knack_pdf_url": a.knack_pdf_url,
+        "knack_record_id": a.knack_record_id,
+        "imported_at": a.imported_at.isoformat() if a.imported_at else None,
+        "items": items,
+        "tg_url": (
+            f"https://www.teamgram.com/aremak/parties/show?id={a.tg_party_id}"
+            if a.tg_party_id else None
+        ),
     }
 
 

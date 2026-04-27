@@ -41,10 +41,11 @@ export default function PurchaseOrdersListPage() {
       render: (v, r) => (
         <Space size={6}>
           {r.parent_id && <span style={{ color: '#bfbfbf', fontSize: 14, marginRight: 4 }}>└</span>}
-          <a onClick={() => navigate(`/purchase-orders/${r.id}`)} style={{ cursor: 'pointer' }}>
+          <a onClick={() => navigate(r.is_archive ? `/purchase-orders/archive/${r.archive_id}` : `/purchase-orders/${r.id}`)} style={{ cursor: 'pointer' }}>
             {v || '-'}
           </a>
           {r.is_split && <Tag color="purple" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>BÖLÜNDÜ</Tag>}
+          {r.is_archive && <Tag color="blue" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>ARŞİV</Tag>}
         </Space>
       ),
     },
@@ -100,12 +101,14 @@ export default function PurchaseOrdersListPage() {
       title: '', key: 'actions', width: 200,
       render: (_, r) => (
         <Space size="small">
-          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/purchase-orders/${r.id}`)}>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(r.is_archive ? `/purchase-orders/archive/${r.archive_id}` : `/purchase-orders/${r.id}`)}>
             Detay
           </Button>
-          <Button size="small" icon={<ExportOutlined />} href={r.tg_url} target="_blank" rel="noreferrer">
-            TG
-          </Button>
+          {r.tg_url && (
+            <Button size="small" icon={<ExportOutlined />} href={r.tg_url} target="_blank" rel="noreferrer">
+              TG
+            </Button>
+          )}
         </Space>
       ),
     },
