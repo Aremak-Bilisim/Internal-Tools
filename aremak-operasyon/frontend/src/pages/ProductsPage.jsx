@@ -355,13 +355,6 @@ export default function ProductsPage() {
       width: 200,
     },
     {
-      title: 'SKU',
-      dataIndex: 'sku',
-      key: 'sku',
-      width: 200,
-      render: (v) => <Text code style={{ fontSize: 11 }}>{v || '-'}</Text>,
-    },
-    {
       title: 'Kategori',
       key: 'cat',
       width: 180,
@@ -401,6 +394,13 @@ export default function ProductsPage() {
       key: 'purchase',
       width: 130,
       render: (_, r) => formatPrice(r.purchase_price, r.purchase_currency_name),
+    },
+    {
+      title: 'SKU',
+      dataIndex: 'sku',
+      key: 'sku',
+      width: 200,
+      render: (v) => <Text code style={{ fontSize: 11 }}>{v || '-'}</Text>,
     },
     {
       title: 'Bağlantı',
