@@ -172,10 +172,7 @@ async def list_purchase_orders(
             "currency": a.currency,
             "supplier": a.supplier_name,
             "modified_date": None,
-            "tg_url": (
-                f"https://www.teamgram.com/aremak/parties/show?id={a.tg_party_id}"
-                if a.tg_party_id else None
-            ),
+            "tg_url": None,  # Arşivde TG sipariş linki yok (tedarikçi sayfası ayrı detay sayfasında gösteriliyor)
             "document_url": a.knack_pdf_url,
             "document_name": "Knack PDF" if a.knack_pdf_url else None,
             "receipt_url": None,
