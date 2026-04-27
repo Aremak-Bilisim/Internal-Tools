@@ -273,6 +273,27 @@ def get_shipment(shipment_id: int, db: Session = Depends(get_db), current_user=D
     if not s:
         raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
     result = _shipment_to_dict(s)
+    # Items'a Raf bilgisi ekle (lokal products tablosundan)
+    items = result.get("items") or []
+    if items:
+        from app.models.product import Product
+        # product_name -> shelf map
+        names = [it.get("product_name") for it in items if it.get("product_name")]
+        if names:
+            # Önce displayname formatı: "Brand - Model" → brand+prod_model parçala
+            prods = db.query(Product).all()
+            disp_map = {}
+            for p in prods:
+                key = f"{(p.brand or '').strip()} - {(p.prod_model or '').strip()}".strip(" -")
+                if key:
+                    disp_map[key.lower()] = p.shelf
+                if p.prod_model:
+                    disp_map[p.prod_model.strip().lower()] = p.shelf
+            for it in items:
+                if not it.get("shelf"):
+                    n = (it.get("product_name") or "").strip().lower()
+                    it["shelf"] = disp_map.get(n) or None
+    result["items"] = items
     history_list = [
         {
             "stage_from": h.stage_from,
