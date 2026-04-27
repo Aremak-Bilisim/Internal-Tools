@@ -39,9 +39,12 @@ export default function PurchaseOrdersListPage() {
     {
       title: 'Sipariş Adı', dataIndex: 'name', key: 'name',
       render: (v, r) => (
-        <a onClick={() => navigate(`/purchase-orders/${r.id}`)} style={{ cursor: 'pointer' }}>
-          {v || '-'}
-        </a>
+        <Space size={6}>
+          <a onClick={() => navigate(`/purchase-orders/${r.id}`)} style={{ cursor: 'pointer' }}>
+            {v || '-'}
+          </a>
+          {r.is_split && <Tag color="purple" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px' }}>BÖLÜNDÜ</Tag>}
+        </Space>
       ),
     },
     { title: 'Tedarikçi', dataIndex: 'supplier', key: 'supplier' },
@@ -121,6 +124,7 @@ export default function PurchaseOrdersListPage() {
           loading={loading}
           pagination={{ pageSize: 20 }}
           size="small"
+          expandable={{ defaultExpandAllRows: true, indentSize: 24 }}
           locale={{ emptyText: loading ? <Spin /> : 'Henüz sipariş yok' }}
         />
       </Card>

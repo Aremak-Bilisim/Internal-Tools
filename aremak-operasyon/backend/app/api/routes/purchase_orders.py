@@ -93,20 +93,28 @@ async def list_purchase_orders(
     docs = {d.tg_purchase_id: d for d in db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id.in_(tg_ids)).all()}
     receipts = {d.tg_purchase_id: d for d in db.query(PurchaseReceiptDocument).filter(PurchaseReceiptDocument.tg_purchase_id.in_(tg_ids)).all()}
 
-    items = []
+    by_id: dict[int, dict] = {}
     for p, d in zip(list_rows, details):
         # Detay başarısızsa fallback olarak TG total'ı kullan
         calc_total = None
         item_currency = None
+        is_split = False
+        parent_id = None
         if isinstance(d, dict):
             tg_items = d.get("Items") or []
             calc_total = sum((it.get("LineTotal") or 0) for it in tg_items)
             if tg_items:
                 item_currency = tg_items[0].get("CurrencyName")
+            is_split = bool(d.get("IsSplit"))
+            parent_sale = d.get("ParentSale") or {}
+            try:
+                parent_id = int(parent_sale.get("Id")) if parent_sale.get("Id") else None
+            except (TypeError, ValueError):
+                parent_id = None
 
         doc = docs.get(p.get("Id"))
         rcp = receipts.get(p.get("Id"))
-        items.append({
+        by_id[p.get("Id")] = {
             "id": p.get("Id"),
             "name": p.get("Name") or p.get("Displayname"),
             "displayname": p.get("Displayname"),
@@ -122,8 +130,26 @@ async def list_purchase_orders(
             "document_name": doc.original_name if doc else None,
             "receipt_url": rcp.file_url if rcp else None,
             "receipt_name": rcp.original_name if rcp else None,
-        })
-    return {"items": items, "count": len(items)}
+            "is_split": is_split,
+            "parent_id": parent_id,
+            "children": [],
+        }
+
+    # Ağaç oluştur — child'ları parent'a ekle, sadece top-level olanları root'ta tut
+    roots = []
+    for it in by_id.values():
+        pid = it.get("parent_id")
+        if pid and pid in by_id:
+            by_id[pid]["children"].append(it)
+        else:
+            roots.append(it)
+
+    # Boş children'ları temizle (Ant Design Table boş array'i de + ile gösterir)
+    for it in by_id.values():
+        if not it["children"]:
+            it.pop("children", None)
+
+    return {"items": roots, "count": len(roots)}
 
 
 # ─── PDF Parse + Eşleştirme ──────────────────────────────────────────
@@ -615,10 +641,22 @@ async def confirm_receipt(
             "warning": f"Parent silinemedi: {e}",
         }
 
-    # Lokal PurchaseDocument varsa silinen parent'tan alıp received child'a taşı
-    doc = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == tg_purchase_id).first()
-    if doc and received_id:
-        doc.tg_purchase_id = received_id
+    # Lokal PurchaseDocument (proforma PDF) varsa parent'ta kalsın + her iki child'a kopyala
+    parent_doc = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == tg_purchase_id).first()
+    if parent_doc:
+        for child_id in (received_id, remaining_id):
+            if not child_id:
+                continue
+            existing = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == child_id).first()
+            if existing:
+                continue  # zaten varsa dokunma
+            db.add(PurchaseDocument(
+                tg_purchase_id=child_id,
+                file_url=parent_doc.file_url,
+                original_name=parent_doc.original_name,
+                content_type=parent_doc.content_type,
+                size=parent_doc.size,
+            ))
         db.commit()
 
     return {
