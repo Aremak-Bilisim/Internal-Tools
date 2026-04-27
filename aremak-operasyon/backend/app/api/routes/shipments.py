@@ -126,22 +126,36 @@ def list_shipments(
         archives = db.query(ArchiveShipmentRequest).order_by(
             ArchiveShipmentRequest.talep_tarihi.desc()
         ).all()
+        def _clean_placeholder(v):
+            """'(Faturadan otomatik olarak gelecektir)' gibi placeholder'lari None yap."""
+            if not v:
+                return None
+            s = str(v).strip()
+            if not s or s == "-":
+                return None
+            low = s.lower()
+            if "otomatik olarak" in low or "girilmedi" in low or low.startswith("(") and low.endswith(")"):
+                return None
+            return s
+
         for a in archives:
+            customer = _clean_placeholder(a.alici_adi)
+            order_name = _clean_placeholder(a.irsaliye_adi)
             items.append({
                 "id": f"archive-{a.id}",
                 "archive_id": a.id,
                 "is_archive": True,
-                "customer_name": a.alici_adi,
+                "customer_name": customer or "(Bilinmiyor)",
                 "stage": "shipped",                  # Arşiv kayıtları tamamlanmış (geçmiş veriler)
-                "stage_label": a.durum or "Sevk Edildi",
+                "stage_label": _clean_placeholder(a.durum) or "Sevk Edildi",
                 "delivery_type": a.teslim_sekli,
                 "cargo_company": a.kargo_firmalari,
                 "delivery_address": a.teslimat_adresi,
-                "recipient_name": a.alici_adi,
+                "recipient_name": customer,
                 "recipient_phone": a.alici_telefon,
                 "planned_ship_date": a.planlanan_sevk_tarihi,
                 "tg_order_id": None,
-                "tg_order_name": a.irsaliye_adi,
+                "tg_order_name": order_name,
                 "invoice_url": None,
                 "invoice_no": None,
                 "irsaliye_id": None,
