@@ -314,6 +314,15 @@ export default function OrdersPage() {
 
   const findInvoice = (r) => orderInvoiceMap[r.Id] || null
 
+  // Parent (split) için: children'ın faturalarını topla. Tek sipariş için: tek fatura array'i.
+  const findInvoicesForRow = (r) => {
+    if (r.is_split && r.children?.length) {
+      return r.children.map(findInvoice).filter(Boolean)
+    }
+    const inv = findInvoice(r)
+    return inv ? [inv] : []
+  }
+
   const customerFilters = useMemo(() => {
     const names = new Set()
     ;(data.List || []).forEach(r => {
@@ -619,34 +628,38 @@ export default function OrdersPage() {
         { text: 'Yok', value: 'yok' },
       ],
       onFilter: (value, r) => {
-        const hasInv = !!(findInvoice(r) || (r.HasInvoice && !invoicesLoaded))
+        const invs = findInvoicesForRow(r)
+        const hasInv = invs.length > 0 || (r.HasInvoice && !invoicesLoaded)
         return value === 'var' ? hasInv : !hasInv
       },
       render: (_, r) => {
-
-        const inv = findInvoice(r)
-        if (inv) {
+        const invs = findInvoicesForRow(r)
+        if (invs.length > 0) {
           return (
-            <div style={{ display: 'flex', gap: 4 }}>
-              <Tooltip title={inv.invoice_no ? `${inv.invoice_no} — Paraşüt'te gör` : 'Paraşüt\'te onay bekleniyor'}>
-                <Tag
-                  color={inv.invoice_no ? 'green' : 'orange'}
-                  style={{ cursor: 'pointer', margin: 0 }}
-                  onClick={() => window.open(inv.url, '_blank')}
-                >
-                  {inv.invoice_no ? inv.invoice_no + ' ↗' : 'Onay Bekleniyor ↗'}
-                </Tag>
-              </Tooltip>
-              <Tooltip title="PDF görüntüle">
-                <Button
-                  type="text"
-                  icon={<FilePdfOutlined />}
-                  size="small"
-                  loading={pdfLoading[inv.id]}
-                  onClick={() => openPdf(inv.id)}
-                  style={{ color: '#ff4d4f', padding: '0 2px' }}
-                />
-              </Tooltip>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {invs.map((inv) => (
+                <div key={inv.id} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <Tooltip title={inv.invoice_no ? `${inv.invoice_no} — Paraşüt'te gör` : 'Paraşüt\'te onay bekleniyor'}>
+                    <Tag
+                      color={inv.invoice_no ? 'green' : 'orange'}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                      onClick={() => window.open(inv.url, '_blank')}
+                    >
+                      {inv.invoice_no ? inv.invoice_no + ' ↗' : 'Onay Bekleniyor ↗'}
+                    </Tag>
+                  </Tooltip>
+                  <Tooltip title="PDF görüntüle">
+                    <Button
+                      type="text"
+                      icon={<FilePdfOutlined />}
+                      size="small"
+                      loading={pdfLoading[inv.id]}
+                      onClick={() => openPdf(inv.id)}
+                      style={{ color: '#ff4d4f', padding: '0 2px' }}
+                    />
+                  </Tooltip>
+                </div>
+              ))}
             </div>
           )
         }
