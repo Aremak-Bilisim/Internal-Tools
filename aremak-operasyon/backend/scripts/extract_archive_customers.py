@@ -152,6 +152,16 @@ def extract_customer_from_pdf(pdf) -> str | None:
     if header_line_idx is None:
         return _fallback_heuristic(full_text, header_match)
 
+    # DEBUG: Header sonrası 12 satırı yazdır
+    if "--verbose" in sys.argv:
+        print(f"\n[VERBOSE] header_line_idx={header_line_idx}")
+        for i in range(header_line_idx, min(header_line_idx + 12, len(lines))):
+            ln = lines[i]
+            line_text = "".join(c.get("text", "") for c in ln).strip()
+            bold_count = sum(1 for c in ln if _is_bold(c.get("fontname", "")))
+            is_b = bold_count >= max(1, len(ln) * 0.5)
+            print(f"  [{i}] BOLD={is_b} top={ln[0].get('top',0):.1f} → {line_text[:90]}")
+
     # Header satırının altındaki BOLD satırları topla — multi-column layout için
     # tolerant: label satırlarını (Vergi No, Mersis, vs.) atla, address keyword'lerinde dur
     LABEL_RE = re.compile(r"^\s*(VERG[İI]\s*NO|VKN|TCKN|MERS[İI]S|T[İI]CARET\s*S[İI]C[İI]L|ADRES|TEL|FAX|E-?POSTA|E-?MAIL|KEP|FATURA\s*NO|TAR[İI]H|SENARYO)\s*[:.]?\s*$", re.IGNORECASE)
