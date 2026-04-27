@@ -194,18 +194,41 @@ async def get_purchase(purchase_id: int) -> dict:
     return await _get(f"{DOMAIN}/Purchases/Get", {"id": purchase_id})
 
 
-async def create_purchase(payload: dict) -> dict:
+async def create_purchase(payload: dict, split_order_id: Optional[int] = None) -> dict:
     """
     Yeni tedarikçi siparişi oluşturur.
-    DİKKAT: TG, ASCII-escape'li JSON'da Türkçe karakteri '?' yapıyor.
-    Bu yüzden manuel UTF-8 byte gönderiyoruz + charset=utf-8 header.
+    split_order_id verilirse parent siparişin "split child"ı olarak yaratılır.
+    DİKKAT: TG, ASCII-escape'li JSON'da Türkçe karakteri '?' yapıyor → UTF-8 byte gönderiyoruz.
     """
     import json as _json
     url = f"{BASE}/{DOMAIN}/Purchases/Create"
+    if split_order_id:
+        url += f"?splitOrderId={split_order_id}"
     body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(url, headers=headers, content=body)
+        r.raise_for_status()
+        return r.json()
+
+
+async def edit_purchase(payload: dict) -> dict:
+    """Tedarikçi siparişini günceller. payload içinde Id zorunlu."""
+    import json as _json
+    url = f"{BASE}/{DOMAIN}/Purchases/Edit"
+    body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(url, headers=headers, content=body)
+        r.raise_for_status()
+        return r.json()
+
+
+async def delete_purchase(purchase_id: int) -> dict:
+    """Tedarikçi siparişini siler."""
+    url = f"{BASE}/{DOMAIN}/Purchases/Delete?id={purchase_id}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS)
         r.raise_for_status()
         return r.json()
 

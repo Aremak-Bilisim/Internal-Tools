@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.models.product import Product
 from app.models.purchase_match import PurchaseMatch
 from app.models.purchase_document import PurchaseDocument
-from app.services import pdf_parser, teamgram
+from app.services import pdf_parser, excel_parser, teamgram
 
 import os
 import uuid as _uuid
@@ -380,6 +380,196 @@ async def create_purchase(
         "tg_purchase_id": purchase_id,
         "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={purchase_id}" if purchase_id else None,
         "raw": result,
+    }
+
+
+# ─── Teslim Onayı: Excel parse ───────────────────────────────────────
+@router.post("/{tg_purchase_id}/parse-receipt-excel")
+async def parse_receipt_excel(
+    tg_purchase_id: int,
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+):
+    """Hikrobot CI Excel'inden model_name → toplam adet eşleşmesi çıkarır."""
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Sadece Excel (.xlsx) kabul edilir")
+    content = await file.read()
+    try:
+        parsed = excel_parser.parse_ci_quantities(content)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Excel parse edilemedi: {e}")
+    return parsed
+
+
+# ─── Teslim Onayı: Confirm ───────────────────────────────────────────
+class ReceiptItemIn(BaseModel):
+    tg_product_id: int
+    ordered_qty: float
+    received_qty: float
+    included: bool = True
+    price: float
+    currency: str = "USD"
+    vat: Optional[float] = 20.0
+    unit: Optional[str] = "adet"
+    description: Optional[str] = None
+
+
+class ConfirmReceiptIn(BaseModel):
+    items: list[ReceiptItemIn]
+
+
+def _build_tg_item(it: "ReceiptItemIn", quantity: float) -> dict:
+    return {
+        "Product": {"Id": it.tg_product_id},
+        "Quantity": quantity,
+        "Price": it.price,
+        "CurrencyName": it.currency,
+        "Vat": it.vat or 20.0,
+        "Unit": it.unit or "adet",
+        "Description": it.description,
+        "DiscountType": 0,
+        "Discount": 0,
+    }
+
+
+@router.post("/{tg_purchase_id}/confirm-receipt")
+async def confirm_receipt(
+    tg_purchase_id: int,
+    data: ConfirmReceiptIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Teslim onayı işle:
+    - Tam teslim (hepsi seçili + received==ordered): parent'ı Teslim Alındı/Closed yap
+    - Parçalı: 2 child sipariş yarat (alınan→Teslim Alındı, kalan→Üretim Bekliyor) + parent sil"""
+    if user.role != "admin":
+        raise HTTPException(403, "Sadece yönetici teslim onayı oluşturabilir")
+
+    if not data.items:
+        raise HTTPException(400, "Kalem listesi boş")
+
+    # Effective received: included değilse 0
+    received_items = []
+    remaining_items = []
+    for it in data.items:
+        eff = it.received_qty if it.included else 0
+        if eff < 0:
+            raise HTTPException(400, "Negatif teslim adedi olamaz")
+        if eff > it.ordered_qty:
+            raise HTTPException(400, f"Teslim adedi sipariş adedinden fazla olamaz (ürün {it.tg_product_id})")
+        if eff > 0:
+            received_items.append((it, eff))
+        leftover = it.ordered_qty - eff
+        if leftover > 0:
+            remaining_items.append((it, leftover))
+
+    if not received_items:
+        raise HTTPException(400, "Teslim alınmış kalem yok — onay anlamsız")
+
+    # ── Tam teslim: parent'ı güncelle ──
+    if not remaining_items:
+        try:
+            parent = await teamgram.get_purchase(tg_purchase_id)
+        except Exception as e:
+            raise HTTPException(502, f"Parent çekilemedi: {e}")
+        parent["Status"] = 1
+        parent["CustomStageId"] = 196789  # Teslim Alındı
+        parent["RelatedEntityId"] = (parent.get("RelatedEntity") or {}).get("Id")
+        parent["AttnId"] = (parent.get("Attn") or {}).get("Id")
+        try:
+            await teamgram.edit_purchase(parent)
+        except Exception as e:
+            raise HTTPException(502, f"Parent güncellenemedi: {e}")
+        return {
+            "ok": True,
+            "mode": "full",
+            "tg_purchase_id": tg_purchase_id,
+            "received_purchase_id": tg_purchase_id,
+            "remaining_purchase_id": None,
+        }
+
+    # ── Parçalı: 2 child + parent sil ──
+    parent = None
+    try:
+        parent = await teamgram.get_purchase(tg_purchase_id)
+    except Exception as e:
+        raise HTTPException(502, f"Parent çekilemedi: {e}")
+
+    parent_name = parent.get("Name") or f"#{tg_purchase_id}"
+    related_id = (parent.get("RelatedEntity") or {}).get("Id")
+    attn_id = (parent.get("Attn") or {}).get("Id")
+    delivery = parent.get("DeliveryAddress") or DEFAULT_DELIVERY_ADDRESS
+    billing = parent.get("BillingAddress") or DEFAULT_DELIVERY_ADDRESS
+    order_date = parent.get("OrderDate") or datetime.utcnow().strftime("%Y-%m-%dT00:00:00")
+    description = parent.get("Description")
+
+    # Child A: alınan
+    received_payload = {
+        "Name": f"{parent_name} - Teslim Alınan",
+        "OrderDate": order_date,
+        "Stage": 0,
+        "Status": 1,                       # ClosedReceived
+        "CustomStageId": 196789,            # Teslim Alındı
+        "VatType": 1,
+        "RelatedEntityId": related_id,
+        "AttnId": attn_id,
+        "DeliveryAddress": delivery,
+        "BillingAddress": billing,
+        "Description": description,
+        "Items": [_build_tg_item(it, q) for it, q in received_items],
+    }
+
+    # Child B: kalan
+    remaining_payload = {
+        "Name": f"{parent_name} - Kalan",
+        "OrderDate": order_date,
+        "Stage": 0,
+        "Status": 0,                       # OpenRequested
+        "CustomStageId": URETIM_BEKLENIYOR_STAGE_ID,
+        "VatType": 1,
+        "RelatedEntityId": related_id,
+        "AttnId": attn_id,
+        "DeliveryAddress": delivery,
+        "BillingAddress": billing,
+        "Description": description,
+        "Items": [_build_tg_item(it, q) for it, q in remaining_items],
+    }
+
+    try:
+        r1 = await teamgram.create_purchase(received_payload, split_order_id=tg_purchase_id)
+        r2 = await teamgram.create_purchase(remaining_payload, split_order_id=tg_purchase_id)
+    except Exception as e:
+        raise HTTPException(502, f"Child sipariş oluşturulamadı: {e}")
+
+    received_id = r1.get("Id")
+    remaining_id = r2.get("Id")
+
+    # Parent'ı sil
+    try:
+        await teamgram.delete_purchase(tg_purchase_id)
+    except Exception as e:
+        # Parent silinemese bile child'lar yaratıldı — sadece uyarı
+        return {
+            "ok": True,
+            "mode": "partial",
+            "received_purchase_id": received_id,
+            "remaining_purchase_id": remaining_id,
+            "warning": f"Parent silinemedi: {e}",
+        }
+
+    # Lokal PurchaseDocument varsa silinen parent'tan alıp received child'a taşı
+    doc = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == tg_purchase_id).first()
+    if doc and received_id:
+        doc.tg_purchase_id = received_id
+        db.commit()
+
+    return {
+        "ok": True,
+        "mode": "partial",
+        "received_purchase_id": received_id,
+        "remaining_purchase_id": remaining_id,
     }
 
 
