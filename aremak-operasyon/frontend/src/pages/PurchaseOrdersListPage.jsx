@@ -63,7 +63,7 @@ export default function PurchaseOrdersListPage() {
       },
     },
     {
-      title: 'Toplam Tutar', dataIndex: 'total', key: 'total', width: 150, align: 'right',
+      title: 'Toplam Tutar (KDV Hariç)', dataIndex: 'total', key: 'total', width: 180, align: 'right',
       render: (v, r) => v != null
         ? `${Number(v).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${r.currency || ''}`
         : '-',

@@ -63,14 +63,32 @@ class CreatePurchaseIn(BaseModel):
 async def list_purchase_orders(
     user=Depends(get_current_user),
 ):
-    """Hikrobot'un TG'deki tedarikçi siparişlerini listeler."""
+    """Hikrobot'un TG'deki tedarikçi siparişlerini listeler.
+    Toplam tutar: kalemlerden hesaplanır (KDV hariç) — TG'nin DiscountedTotal'ı KDV dahil ve TL'ye çevrilmiş."""
+    import asyncio
+
     try:
         data = await teamgram.get_purchases(page=1, pagesize=50, party_id=HIKROBOT_COMPANY_ID)
     except Exception as e:
         raise HTTPException(502, f"TG'den siparişler alınamadı: {e}")
 
+    list_rows = data.get("List") or []
+
+    # Her sipariş için detay çek (parallel) ki kalemlerden KDV hariç toplam çıkarabilelim
+    detail_tasks = [teamgram.get_purchase(p.get("Id")) for p in list_rows if p.get("Id")]
+    details = await asyncio.gather(*detail_tasks, return_exceptions=True)
+
     items = []
-    for p in (data.get("List") or []):
+    for p, d in zip(list_rows, details):
+        # Detay başarısızsa fallback olarak TG total'ı kullan
+        calc_total = None
+        item_currency = None
+        if isinstance(d, dict):
+            tg_items = d.get("Items") or []
+            calc_total = sum((it.get("LineTotal") or 0) for it in tg_items)
+            if tg_items:
+                item_currency = tg_items[0].get("CurrencyName")
+
         items.append({
             "id": p.get("Id"),
             "name": p.get("Name") or p.get("Displayname"),
@@ -78,8 +96,8 @@ async def list_purchase_orders(
             "order_date": (p.get("OrderDate") or "")[:10],
             "stage_name": p.get("CustomStageName"),
             "status": p.get("Status"),
-            "total": p.get("DiscountedTotal"),
-            "currency": p.get("CurrencyName"),
+            "total": calc_total if calc_total is not None else p.get("DiscountedTotal"),
+            "currency": item_currency or p.get("CurrencyName"),
             "supplier": (p.get("RelatedEntity") or {}).get("Name"),
             "modified_date": (p.get("ModifiedDate") or "")[:10],
             "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={p.get('Id')}",
