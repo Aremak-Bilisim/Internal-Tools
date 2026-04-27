@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import {
   Card, Descriptions, Tag, Button, Typography, Spin, Divider, Table, message, Popconfirm, Space, Row, Col,
+  Drawer, InputNumber, Modal, Alert,
 } from 'antd'
-import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined, FilePdfOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined, FilePdfOutlined, BranchesOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import api from '../services/api'
 
@@ -56,6 +57,10 @@ export default function OrderDetailPage() {
   const [irsaliyePdfLoading, setIrsaliyePdfLoading] = useState(false)
   const [lineItems, setLineItems] = useState(null)
   const [lineItemsLoading, setLineItemsLoading] = useState(false)
+  // ─── Parçalı Sipariş ───
+  const [splitOpen, setSplitOpen] = useState(false)
+  const [splitItems, setSplitItems] = useState([])     // {tg_product_id, displayname, ordered_qty, in_stock, stock_local, price, currency, vat, unit, description}
+  const [splitting, setSplitting] = useState(false)
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -185,6 +190,87 @@ export default function OrderDetailPage() {
     { title: 'Toplam', key: 'total', width: 150, render: (_, r) => `${Number(r.LineTotal || 0).toLocaleString('tr-TR')} ${r.CurrencyName || order?.CurrencyName || ''}` },
   ]
 
+  // ─── Parçalı Sipariş ───
+  const canSplit = order && order.Status === 0 && !order.IsSplit && !shipment
+
+  const openSplitDrawer = async () => {
+    if (!order?.Items?.length) return
+    // Her ürün için lokal stok bilgisini parallel çek
+    const stockResults = await Promise.all(
+      order.Items.map((it) =>
+        api.get(`/orders/products/${it.Product?.Id}/stock`)
+          .then((r) => r.data?.inventory ?? 0)
+          .catch(() => 0)
+      )
+    )
+    const items = order.Items.map((it, i) => {
+      const ordered = Number(it.Quantity) || 0
+      const stock = Number(stockResults[i]) || 0
+      const inStock = Math.min(stock, ordered)
+      return {
+        tg_product_id: it.Product?.Id,
+        displayname: it.Product?.Displayname || it.Title || '-',
+        ordered_qty: ordered,
+        in_stock: inStock,
+        stock_local: stock,
+        price: Number(it.Price) || 0,
+        currency: it.CurrencyName || order.CurrencyName || 'USD',
+        vat: it.Vat ?? 20,
+        unit: it.Unit || 'adet',
+        description: it.Description || null,
+      }
+    })
+    setSplitItems(items)
+    setSplitOpen(true)
+  }
+
+  const updateSplitItem = (idx, field, value) => {
+    setSplitItems((prev) => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
+  }
+
+  const handleSplit = async () => {
+    const hasInStock = splitItems.some((it) => it.in_stock > 0)
+    const hasWaiting = splitItems.some((it) => (it.ordered_qty - it.in_stock) > 0)
+    if (!hasInStock || !hasWaiting) {
+      message.warning('Parçalı sipariş için hem "Hemen Sevk" hem "Tedarik Bekliyor" kısmı dolu olmalı')
+      return
+    }
+    setSplitting(true)
+    try {
+      const payload = {
+        items: splitItems.map((it) => ({
+          tg_product_id: it.tg_product_id,
+          ordered_qty: it.ordered_qty,
+          in_stock_qty: it.in_stock,
+          price: it.price,
+          currency: it.currency,
+          vat: it.vat,
+          unit: it.unit,
+          description: it.description,
+        })),
+      }
+      const r = await api.post(`/orders/${id}/split`, payload)
+      Modal.success({
+        title: 'Parçalı sipariş oluşturuldu',
+        content: (
+          <div>
+            <p>İki sipariş yaratıldı:</p>
+            <ul>
+              <li>Hemen Sevk: <a onClick={() => navigate(`/orders/${r.data.in_stock_order_id}`)}>#{r.data.in_stock_order_id}</a></li>
+              <li>Tedarik Bekliyor: <a onClick={() => navigate(`/orders/${r.data.waiting_order_id}`)}>#{r.data.waiting_order_id}</a></li>
+            </ul>
+          </div>
+        ),
+        onOk: () => navigate('/orders'),
+      })
+      setSplitOpen(false)
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Bölme başarısız')
+    } finally {
+      setSplitting(false)
+    }
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -197,7 +283,21 @@ export default function OrderDetailPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Sipariş Bilgileri */}
-          <Card title="Sipariş Bilgileri">
+          <Card
+            title={
+              <Space>
+                <span>Sipariş Bilgileri</span>
+                {order?.IsSplit && <Tag color="purple">BÖLÜNDÜ</Tag>}
+              </Space>
+            }
+            extra={
+              canSplit && (
+                <Button icon={<BranchesOutlined />} onClick={openSplitDrawer}>
+                  Parçalı Sipariş Oluştur
+                </Button>
+              )
+            }
+          >
             <Descriptions column={2} size="small">
               <Descriptions.Item label="Müşteri">
                 {order?.RelatedEntity?.Displayname || order?.RelatedEntity?.Name || '-'}
@@ -462,6 +562,86 @@ export default function OrderDetailPage() {
 
         </div>
       </Spin>
+
+      {/* Parçalı Sipariş Drawer */}
+      <Drawer
+        title={`Parçalı Sipariş — ${order?.Displayname || ''}`}
+        open={splitOpen}
+        onClose={() => setSplitOpen(false)}
+        width={820}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setSplitOpen(false)}>İptal</Button>
+            <Button type="primary" icon={<BranchesOutlined />} loading={splitting} onClick={handleSplit}>
+              2 Parçalı Sipariş Oluştur
+            </Button>
+          </div>
+        }
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="Sipariş ikiye bölünecek"
+          description="Stoktan Hemen Sevk edilebilecek kalemler bir sipariş, kalan tedarik beklenen kalemler ayrı bir sipariş olarak yaratılır. Mevcut sipariş 'BÖLÜNDÜ' olarak işaretlenir."
+        />
+
+        <Table
+          dataSource={splitItems}
+          rowKey={(_, i) => i}
+          pagination={false}
+          size="small"
+          columns={[
+            {
+              title: 'Ürün',
+              dataIndex: 'displayname',
+              render: (v) => <span style={{ fontWeight: 500 }}>{v}</span>,
+            },
+            { title: 'Sipariş', dataIndex: 'ordered_qty', width: 90, align: 'right',
+              render: (v) => Number(v).toLocaleString('tr-TR') },
+            { title: 'Stok', dataIndex: 'stock_local', width: 90, align: 'right',
+              render: (v) => (
+                <Tag color={v > 0 ? 'green' : 'default'}>{Number(v).toLocaleString('tr-TR')}</Tag>
+              ) },
+            {
+              title: 'Hemen Sevk', dataIndex: 'in_stock', width: 130,
+              render: (v, r, idx) => (
+                <InputNumber
+                  size="small"
+                  value={v}
+                  min={0}
+                  max={r.ordered_qty}
+                  step={1}
+                  style={{ width: '100%' }}
+                  onChange={(val) => updateSplitItem(idx, 'in_stock', val ?? 0)}
+                />
+              ),
+            },
+            {
+              title: 'Tedarik Bekliyor', key: 'waiting', width: 130, align: 'right',
+              render: (_, r) => {
+                const waiting = (r.ordered_qty || 0) - (r.in_stock || 0)
+                return waiting > 0
+                  ? <Tag color="orange">{waiting.toLocaleString('tr-TR')}</Tag>
+                  : <Tag color="green">✓ Hepsi sevk</Tag>
+              },
+            },
+          ]}
+        />
+
+        {(() => {
+          const inStockTotal = splitItems.reduce((s, it) => s + (Number(it.in_stock) || 0), 0)
+          const waitingTotal = splitItems.reduce((s, it) => s + ((Number(it.ordered_qty) || 0) - (Number(it.in_stock) || 0)), 0)
+          return (
+            <div style={{ marginTop: 16, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+              <Space split="·">
+                <Text strong>Hemen Sevk: <Text style={{ color: '#52c41a' }}>{inStockTotal}</Text> adet</Text>
+                <Text strong>Tedarik Bekliyor: <Text style={{ color: '#fa8c16' }}>{waitingTotal}</Text> adet</Text>
+              </Space>
+            </div>
+          )
+        })()}
+      </Drawer>
     </div>
   )
 }

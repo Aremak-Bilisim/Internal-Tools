@@ -1,10 +1,14 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from typing import Optional
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 import httpx
 from app.core.auth import get_current_user
 from app.core.config import settings
+from app.core.database import get_db
+from app.models.product import Product
 from app.services import teamgram
 
 router = APIRouter()
@@ -95,3 +99,141 @@ async def clear_invoice_flag(order_id: int, current_user=Depends(get_current_use
     if not ok:
         raise HTTPException(status_code=502, detail="TeamGram güncellenemedi")
     return {"ok": True}
+
+
+# ─── Parçalı Sipariş (Split) ─────────────────────────────────────────
+class SplitItemIn(BaseModel):
+    tg_product_id: int
+    ordered_qty: float
+    in_stock_qty: float                 # "Hemen Sevk" parçasına gidecek miktar
+    price: float
+    currency: str = "USD"
+    vat: Optional[float] = 20.0
+    unit: Optional[str] = "adet"
+    description: Optional[str] = None
+
+
+class SplitOrderIn(BaseModel):
+    items: list[SplitItemIn]
+
+
+def _build_order_item(it, qty: float) -> dict:
+    return {
+        "Product": {"Id": it.tg_product_id},
+        "Quantity": qty,
+        "Price": it.price,
+        "CurrencyName": it.currency,
+        "Vat": it.vat or 20.0,
+        "Unit": it.unit or "adet",
+        "Description": it.description,
+        "DiscountType": 0,
+        "Discount": 0,
+    }
+
+
+@router.post("/{order_id}/split")
+async def split_order(
+    order_id: int,
+    data: SplitOrderIn,
+    current_user=Depends(get_current_user),
+):
+    """
+    Müşteri siparişini ikiye böl:
+      - Hemen Sevk child: in_stock_qty > 0 olan kalemler (durum: Açık)
+      - Tedarik Bekliyor child: ordered - in_stock > 0 olan kalemler (durum: Açık, Stage: Tedarik Bekliyor)
+    Parent IsSplit=True olarak kalır.
+    """
+    if not data.items:
+        raise HTTPException(400, "Kalem listesi boş")
+
+    in_stock_items: list[tuple[SplitItemIn, float]] = []
+    waiting_items: list[tuple[SplitItemIn, float]] = []
+
+    for it in data.items:
+        if it.in_stock_qty < 0 or it.in_stock_qty > it.ordered_qty:
+            raise HTTPException(400, f"Geçersiz adet (ürün {it.tg_product_id}): in_stock={it.in_stock_qty} ordered={it.ordered_qty}")
+        if it.in_stock_qty > 0:
+            in_stock_items.append((it, it.in_stock_qty))
+        leftover = it.ordered_qty - it.in_stock_qty
+        if leftover > 0:
+            waiting_items.append((it, leftover))
+
+    if not in_stock_items and not waiting_items:
+        raise HTTPException(400, "Hiç adet belirtilmemiş")
+    if not in_stock_items or not waiting_items:
+        raise HTTPException(400, "Parçalı sipariş için hem 'Hemen Sevk' hem 'Tedarik Bekliyor' kısmı dolu olmalı")
+
+    try:
+        parent = await teamgram.get_order(order_id)
+    except Exception as e:
+        raise HTTPException(502, f"Parent sipariş çekilemedi: {e}")
+
+    parent_name = parent.get("Name") or f"#{order_id}"
+    sched = parent.get("ScheduledFulfilment") or datetime.utcnow().strftime("%Y-%m-%dT00:00:00")
+    related_id = (parent.get("RelatedEntity") or {}).get("Id")
+    attn_id = (parent.get("Attn") or {}).get("Id") if parent.get("Attn") else 0
+    delivery = parent.get("DeliveryAddress") or ""
+    billing = parent.get("BillingAddress") or ""
+    currency = parent.get("CurrencyName") or "USD"
+    vat_type = parent.get("VatType", 1)
+
+    common = {
+        "OrderDate": parent.get("OrderDate") or datetime.utcnow().strftime("%Y-%m-%dT00:00:00"),
+        "ScheduledFulfilment": sched,
+        "Stage": 0,
+        "Status": 0,
+        "VatType": vat_type,
+        "RelatedEntityId": related_id,
+        "AttnId": attn_id,
+        "DeliveryAddress": delivery,
+        "BillingAddress": billing,
+        "CurrencyName": currency,
+    }
+
+    in_stock_payload = {
+        **common,
+        "Name": f"{parent_name} - Hemen Sevk",
+        "Items": [_build_order_item(it, q) for it, q in in_stock_items],
+    }
+    waiting_payload = {
+        **common,
+        "Name": f"{parent_name} - Tedarik Bekliyor",
+        "Items": [_build_order_item(it, q) for it, q in waiting_items],
+    }
+
+    try:
+        r1 = await teamgram.create_order(in_stock_payload, split_order_id=order_id)
+        r2 = await teamgram.create_order(waiting_payload, split_order_id=order_id)
+    except Exception as e:
+        raise HTTPException(502, f"Split sipariş oluşturulamadı: {e}")
+
+    if not (r1.get("Result") or r1.get("Id")):
+        raise HTTPException(502, f"Hemen Sevk oluşturulamadı: {r1.get('Message')}")
+    if not (r2.get("Result") or r2.get("Id")):
+        raise HTTPException(502, f"Tedarik Bekliyor oluşturulamadı: {r2.get('Message')}")
+
+    return {
+        "ok": True,
+        "in_stock_order_id": r1.get("Id"),
+        "in_stock_url": r1.get("Url"),
+        "waiting_order_id": r2.get("Id"),
+        "waiting_url": r2.get("Url"),
+    }
+
+
+# ─── Ürün Stok Bilgisi (split sırasında otomatik öneri için) ─────────
+@router.get("/products/{tg_product_id}/stock")
+def product_stock(
+    tg_product_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Lokal products tablosundan stok bilgisi döner."""
+    p = db.query(Product).filter(Product.tg_id == tg_product_id).first()
+    if not p:
+        return {"tg_product_id": tg_product_id, "inventory": None, "found": False}
+    return {
+        "tg_product_id": tg_product_id,
+        "inventory": float(p.inventory or 0),
+        "found": True,
+    }

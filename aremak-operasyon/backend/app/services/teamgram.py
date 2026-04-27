@@ -122,6 +122,32 @@ async def get_order(order_id: int) -> dict:
     return await _get_v1(f"{DOMAIN}/Orders/Get", {"id": order_id})
 
 
+async def create_order(payload: dict, split_order_id: Optional[int] = None) -> dict:
+    """
+    Yeni müşteri siparişi oluşturur. split_order_id verilirse parent'ın split child'ı olur.
+    UTF-8 byte gönderiyoruz (Türkçe karakter için).
+    """
+    import json as _json
+    url = f"{BASE}/v1/{DOMAIN}/Orders/Create"
+    if split_order_id:
+        url += f"?splitOrderId={split_order_id}"
+    body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(url, headers=headers, content=body)
+        r.raise_for_status()
+        return r.json()
+
+
+async def delete_order(order_id: int) -> dict:
+    """Müşteri siparişini siler (split child temizliği için)."""
+    url = f"{BASE}/aremak/Orders/Delete?id={order_id}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, headers=HEADERS)
+        r.raise_for_status()
+        return r.json()
+
+
 async def get_companies(page: int = 1, pagesize: int = 50) -> dict:
     return await _get(f"{DOMAIN}/Companies/Index", {"page": page, "pagesize": pagesize})
 
