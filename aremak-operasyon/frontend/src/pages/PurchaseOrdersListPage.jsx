@@ -56,6 +56,12 @@ export default function PurchaseOrdersListPage() {
       defaultSortOrder: 'descend',
     },
     {
+      title: 'Teslim Tarihi', dataIndex: 'delivery_date', key: 'delivery_date', width: 130,
+      render: (v) => v
+        ? <span style={{ color: '#52c41a' }}>{v}</span>
+        : <span style={{ color: '#bfbfbf' }}>—</span>,
+    },
+    {
       title: 'Aşama', dataIndex: 'stage_name', key: 'stage_name', width: 200,
       render: (v) => v ? <Tag color={STAGE_COLORS[v] || 'default'}>{v}</Tag> : '-',
     },

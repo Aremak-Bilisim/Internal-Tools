@@ -114,11 +114,15 @@ async def list_purchase_orders(
 
         doc = docs.get(p.get("Id"))
         rcp = receipts.get(p.get("Id"))
+        actual_fulfilment = (d.get("ActualFulfilment") or "")[:10] if isinstance(d, dict) else ""
+        scheduled_fulfilment = (d.get("ScheduledFulfilment") or "")[:10] if isinstance(d, dict) else ""
         by_id[p.get("Id")] = {
             "id": p.get("Id"),
             "name": p.get("Name") or p.get("Displayname"),
             "displayname": p.get("Displayname"),
             "order_date": (p.get("OrderDate") or "")[:10],
+            "delivery_date": actual_fulfilment or None,
+            "scheduled_delivery_date": scheduled_fulfilment or None,
             "stage_name": p.get("CustomStageName"),
             "status": p.get("Status"),
             "total": calc_total if calc_total is not None else p.get("DiscountedTotal"),
