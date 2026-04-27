@@ -215,6 +215,32 @@ export default function PurchaseOrdersListPage() {
           size="small"
           expandable={{ defaultExpandAllRows: true, indentSize: 48 }}
           locale={{ emptyText: loading ? <Spin /> : 'Sipariş yok' }}
+          summary={(pageData) => {
+            // Para birimi başına topla — child'lar dahil edilir (parent ise zaten gösterilir, root sırasındakiler hesaplanır)
+            const totals = {}
+            for (const r of pageData) {
+              if (r.total != null && r.currency) {
+                totals[r.currency] = (totals[r.currency] || 0) + Number(r.total)
+              }
+            }
+            const entries = Object.entries(totals).sort()
+            const summaryText = entries.length === 0
+              ? '-'
+              : entries.map(([c, v]) => `${v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${c}`).join('  ·  ')
+            return (
+              <Table.Summary fixed>
+                <Table.Summary.Row style={{ background: '#fafafa' }}>
+                  <Table.Summary.Cell index={0} colSpan={7}>
+                    <Typography.Text strong>SAYFA TOPLAMI ({pageData.length} sipariş)</Typography.Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} align="right">
+                    <Typography.Text strong>{summaryText}</Typography.Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={8} />
+                </Table.Summary.Row>
+              </Table.Summary>
+            )
+          }}
         />
       </Card>
     </div>
