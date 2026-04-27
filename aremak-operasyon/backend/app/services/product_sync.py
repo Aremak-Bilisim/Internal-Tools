@@ -32,6 +32,7 @@ def _currency_id_to_name(cid: Optional[int]) -> Optional[str]:
 
 
 CF_DATASHEET = 193440  # Datasheet (Web adresi)
+CF_SHELF = 193563      # Raf
 
 
 def _product_to_dict(p: dict, parent_map: dict) -> dict:
@@ -64,6 +65,7 @@ def _product_to_dict(p: dict, parent_map: dict) -> dict:
         "details": p.get("Details"),
         "not_available": bool(p.get("NotAvaliable")),
         "datasheet_url": cfs.get(CF_DATASHEET) or None,
+        "shelf": (cfs.get(CF_SHELF) or "").strip() or None,
     }
 
 

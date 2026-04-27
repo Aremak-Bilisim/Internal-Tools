@@ -46,6 +46,7 @@ def _to_dict(p: Product) -> dict:
         "parasut_url": f"https://uygulama.parasut.com/{PARASUT_COMPANY}/hizmet-ve-urunler/{p.parasut_id}" if p.parasut_id else None,
         "parasut_id": p.parasut_id,
         "datasheet_url": p.datasheet_url,
+        "shelf": p.shelf,
     }
 
 

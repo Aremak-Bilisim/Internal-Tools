@@ -383,6 +383,14 @@ export default function ProductsPage() {
       },
     },
     {
+      title: 'Raf',
+      dataIndex: 'shelf',
+      key: 'shelf',
+      width: 130,
+      render: (v) => v ? <Tag color="geekblue">{v}</Tag> : <span style={{ color: '#bfbfbf' }}>—</span>,
+      sorter: (a, b) => (a.shelf || '').localeCompare(b.shelf || '', 'tr'),
+    },
+    {
       title: 'Satış Fiyatı',
       key: 'price',
       width: 130,

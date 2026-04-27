@@ -38,6 +38,14 @@ def _run_migrations():
                 conn.commit()
         except Exception:
             pass  # tablo yoksa create_all yaratir
+        # products.shelf
+        try:
+            prod_cols = {c["name"] for c in insp.get_columns("products")}
+            if "shelf" not in prod_cols:
+                conn.execute(text("ALTER TABLE products ADD COLUMN shelf VARCHAR"))
+                conn.commit()
+        except Exception:
+            pass
 
 _run_migrations()
 

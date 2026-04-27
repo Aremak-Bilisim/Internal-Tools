@@ -37,5 +37,6 @@ class Product(Base):
 
     parasut_id = Column(String, nullable=True, index=True)  # Paraşüt ürün ID (eşleşince dolar)
     datasheet_url = Column(String, nullable=True)           # TG CustomFieldId 193440 (Datasheet)
+    shelf = Column(String, nullable=True, index=True)       # TG CustomFieldId 193563 (Raf)
 
     synced_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
