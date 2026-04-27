@@ -92,9 +92,11 @@ def extract_customer_from_text(text: str) -> str | None:
 
 
 def find_invoice_file(req: ArchiveShipmentRequest) -> Path | None:
-    """Fatura > İrsaliye sırası ile PDF dosya yolunu döner."""
-    by_cat = {f.alan_adi: f for f in req.files}
-    cand = by_cat.get("Fatura") or by_cat.get("İrsaliye")
+    """Fatura > İrsaliye > Kargo Fişi sırası ile PDF dosya yolunu döner."""
+    by_cat: dict[str, ArchiveShipmentFile] = {}
+    for f in req.files:
+        by_cat.setdefault(f.alan_adi, f)
+    cand = by_cat.get("Fatura") or by_cat.get("İrsaliye") or by_cat.get("Kargo Fişi")
     if not cand:
         return None
     # public path: /uploads/shipments/archive/...
