@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Table, Tag, Button, Typography, Space, Spin, message } from 'antd'
-import { PlusOutlined, ReloadOutlined, ExportOutlined, EyeOutlined, FilePdfOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, ExportOutlined, EyeOutlined, FilePdfOutlined, FileExcelOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -63,12 +63,21 @@ export default function PurchaseOrdersListPage() {
       },
     },
     {
-      title: 'Belge', dataIndex: 'document_url', key: 'document_url', width: 80, align: 'center',
-      render: (url, r) => url
-        ? <a href={url} target="_blank" rel="noreferrer" title={r.document_name || 'Proforma PDF'}>
-            <FilePdfOutlined style={{ fontSize: 18, color: '#ff4d4f' }} />
-          </a>
-        : <span style={{ color: '#ccc' }}>—</span>,
+      title: 'Belgeler', key: 'documents', width: 100, align: 'center',
+      render: (_, r) => (
+        <Space size={4}>
+          {r.document_url
+            ? <a href={r.document_url} target="_blank" rel="noreferrer" title={r.document_name || 'Proforma PDF'}>
+                <FilePdfOutlined style={{ fontSize: 18, color: '#ff4d4f' }} />
+              </a>
+            : <FilePdfOutlined style={{ fontSize: 18, color: '#e0e0e0' }} title="Proforma yok" />}
+          {r.receipt_url
+            ? <a href={r.receipt_url} target="_blank" rel="noreferrer" title={r.receipt_name || 'Teslim CI'}>
+                <FileExcelOutlined style={{ fontSize: 18, color: '#52c41a' }} />
+              </a>
+            : <FileExcelOutlined style={{ fontSize: 18, color: '#e0e0e0' }} title="Teslim CI yok" />}
+        </Space>
+      ),
     },
     {
       title: 'Toplam Tutar (KDV Hariç)', dataIndex: 'total', key: 'total', width: 180, align: 'right',

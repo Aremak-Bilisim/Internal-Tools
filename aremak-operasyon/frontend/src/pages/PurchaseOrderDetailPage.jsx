@@ -28,6 +28,7 @@ export default function PurchaseOrderDetailPage() {
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptItems, setReceiptItems] = useState([])  // {tg_product_id, displayname, ordered_qty, received_qty, included, price, currency, vat, unit, description}
   const [excelLoading, setExcelLoading] = useState(false)
+  const [excelFile, setExcelFile] = useState(null)  // CI Excel — onay sonrası teslim alınan siparişe yüklenecek
   const [submitting, setSubmitting] = useState(false)
 
   const load = () => {
@@ -41,6 +42,7 @@ export default function PurchaseOrderDetailPage() {
   useEffect(() => { load() }, [id])
 
   const openReceiptDrawer = () => {
+    setExcelFile(null)
     setReceiptItems(po.items.map((it) => ({
       tg_product_id: it.tg_product_id,
       displayname: it.displayname || `${it.brand || ''} - ${it.prod_model || ''}`,
@@ -86,6 +88,8 @@ export default function PurchaseOrderDetailPage() {
         unmatchedCount++
         return { ...it, received_qty: 0 }
       }))
+      // Excel'i sakla — onay sonrası teslim alınan siparişe belge olarak yüklenecek
+      setExcelFile(file)
       message.success(`Excel işlendi: ${matchCount} eşleşti, ${unmatchedCount} bulunamadı (0 yapıldı)`)
     } catch (e) {
       message.error(e?.response?.data?.detail || 'Excel parse edilemedi')
@@ -109,6 +113,20 @@ export default function PurchaseOrderDetailPage() {
       const payload = { items: receiptItems }
       const r = await api.post(`/purchase-orders/${id}/confirm-receipt`, payload)
       const data = r.data
+
+      // Excel varsa teslim alınan siparişe belge olarak yükle
+      if (excelFile && data.received_purchase_id) {
+        try {
+          const fd = new FormData()
+          fd.append('file', excelFile)
+          await api.post(`/purchase-orders/${data.received_purchase_id}/receipt-document`, fd, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          })
+        } catch {
+          message.warning('Onay tamam ama CI Excel kaydedilemedi')
+        }
+      }
+
       Modal.success({
         title: 'Teslim onayı oluşturuldu',
         content: (
@@ -204,6 +222,18 @@ export default function PurchaseOrderDetailPage() {
                     style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
                   >
                     Proforma PDF
+                  </Button>
+                )}
+                {po.receipt_url && (
+                  <Button
+                    size="small"
+                    icon={<FileExcelOutlined />}
+                    href={po.receipt_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#52c41a', borderColor: '#52c41a' }}
+                  >
+                    Teslim CI
                   </Button>
                 )}
                 <Button size="small" icon={<ReloadOutlined />} onClick={load}>Yenile</Button>

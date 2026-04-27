@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.models.product import Product
 from app.models.purchase_match import PurchaseMatch
 from app.models.purchase_document import PurchaseDocument
+from app.models.purchase_receipt_document import PurchaseReceiptDocument
 from app.services import pdf_parser, excel_parser, teamgram
 
 import os
@@ -87,9 +88,10 @@ async def list_purchase_orders(
     detail_tasks = [teamgram.get_purchase(p.get("Id")) for p in list_rows if p.get("Id")]
     details = await asyncio.gather(*detail_tasks, return_exceptions=True)
 
-    # Lokal PDF kayıtlarını çek
+    # Lokal PDF + CI Excel kayıtlarını çek
     tg_ids = [p.get("Id") for p in list_rows if p.get("Id")]
     docs = {d.tg_purchase_id: d for d in db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id.in_(tg_ids)).all()}
+    receipts = {d.tg_purchase_id: d for d in db.query(PurchaseReceiptDocument).filter(PurchaseReceiptDocument.tg_purchase_id.in_(tg_ids)).all()}
 
     items = []
     for p, d in zip(list_rows, details):
@@ -103,6 +105,7 @@ async def list_purchase_orders(
                 item_currency = tg_items[0].get("CurrencyName")
 
         doc = docs.get(p.get("Id"))
+        rcp = receipts.get(p.get("Id"))
         items.append({
             "id": p.get("Id"),
             "name": p.get("Name") or p.get("Displayname"),
@@ -117,6 +120,8 @@ async def list_purchase_orders(
             "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={p.get('Id')}",
             "document_url": doc.file_url if doc else None,
             "document_name": doc.original_name if doc else None,
+            "receipt_url": rcp.file_url if rcp else None,
+            "receipt_name": rcp.original_name if rcp else None,
         })
     return {"items": items, "count": len(items)}
 
@@ -274,6 +279,54 @@ async def upload_purchase_document(
             file_url=file_url,
             original_name=file.filename,
             content_type=file.content_type or "application/pdf",
+            size=len(content),
+        )
+        db.add(existing)
+    db.commit()
+    return {"ok": True, "file_url": file_url, "original_name": existing.original_name}
+
+
+# ─── Teslim Belgesi (CI Excel) yükle ─────────────────────────────────
+@router.post("/{tg_purchase_id}/receipt-document")
+async def upload_receipt_document(
+    tg_purchase_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Teslim alınan siparişe ait CI Excel'ini lokal sunucuya kaydeder."""
+    fname_lower = file.filename.lower()
+    if not (fname_lower.endswith(".xlsx") or fname_lower.endswith(".xls")):
+        raise HTTPException(400, "Sadece Excel kabul edilir")
+
+    content = await file.read()
+    fname = f"receipt_{tg_purchase_id}_{_uuid.uuid4().hex[:8]}.xlsx"
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    with open(fpath, "wb") as f:
+        f.write(content)
+    file_url = f"/uploads/purchase_orders/{fname}"
+
+    existing = db.query(PurchaseReceiptDocument).filter(
+        PurchaseReceiptDocument.tg_purchase_id == tg_purchase_id
+    ).first()
+    if existing:
+        # Eski dosyayı sil
+        try:
+            old_path = os.path.join(UPLOAD_DIR, os.path.basename(existing.file_url))
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        except Exception:
+            pass
+        existing.file_url = file_url
+        existing.original_name = file.filename
+        existing.content_type = file.content_type or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        existing.size = len(content)
+    else:
+        existing = PurchaseReceiptDocument(
+            tg_purchase_id=tg_purchase_id,
+            file_url=file_url,
+            original_name=file.filename,
+            content_type=file.content_type or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             size=len(content),
         )
         db.add(existing)
@@ -592,8 +645,9 @@ async def get_purchase_order(
     if not d or not d.get("Id"):
         raise HTTPException(404, "Sipariş bulunamadı")
 
-    # Lokal PDF
+    # Lokal PDF + CI Excel
     doc = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == purchase_id).first()
+    rcp = db.query(PurchaseReceiptDocument).filter(PurchaseReceiptDocument.tg_purchase_id == purchase_id).first()
 
     items = []
     for it in (d.get("Items") or []):
@@ -650,4 +704,6 @@ async def get_purchase_order(
         "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={d.get('Id')}",
         "document_url": doc.file_url if doc else None,
         "document_name": doc.original_name if doc else None,
+        "receipt_url": rcp.file_url if rcp else None,
+        "receipt_name": rcp.original_name if rcp else None,
     }
