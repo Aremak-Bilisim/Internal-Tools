@@ -339,6 +339,7 @@ async def split_order(
     in_stock_payload = {
         **common,
         "Name": f"{parent_name} - Hemen Sevk",
+        "Status": 1,                          # Tamamlandı
         "CustomStageId": HAZIRLANIYOR_STAGE_ID,
         "Items": [_build_order_item(it, q) for it, q in in_stock_items],
     }
