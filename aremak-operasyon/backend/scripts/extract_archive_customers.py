@@ -77,39 +77,140 @@ ADDRESS_HINT_RE = re.compile(
 )
 
 
+def _is_bold(fontname: str) -> bool:
+    fn = (fontname or "").lower()
+    return "bold" in fn or "heavy" in fn or "black" in fn or "-b" in fn
+
+
+def extract_customer_from_pdf(pdf) -> str | None:
+    """
+    PDF'in ilk 2 sayfasından müşteri adını çıkar.
+    Stratejisi:
+      1. Char-level bold detection: SAYIN/ALICI/MUSTERI başlığı altındaki
+         ardışık BOLD satırları al, ilk non-bold satırda dur (= adres başlangıcı).
+      2. Bold tespit edilemezse fallback: text + suffix-based heuristic.
+    """
+    # Önce text'i al — header pozisyonu için
+    text_pages = []
+    pages_data = []
+    try:
+        for page in pdf.pages[:2]:
+            text = page.extract_text() or ""
+            text_pages.append(text)
+            chars = page.chars or []
+            pages_data.append((text, chars))
+    except Exception:
+        return None
+
+    full_text = "\n".join(text_pages)
+
+    # Header pozisyonunu bul
+    header_match = None
+    for pat in HEADER_PATTERNS:
+        m = re.search(pat, full_text, flags=re.IGNORECASE)
+        if m:
+            header_match = m
+            break
+    if not header_match:
+        return None
+
+    # Hangi sayfada header var?
+    page_idx = 0
+    cumulative = 0
+    for i, t in enumerate(text_pages):
+        if cumulative + len(t) >= header_match.start():
+            page_idx = i
+            break
+        cumulative += len(t) + 1
+
+    text, chars = pages_data[page_idx]
+    if not chars:
+        return _fallback_heuristic(full_text, header_match)
+
+    # Header'ın PDF'teki Y pozisyonunu yaklaşık tahmin
+    # Char'ları satır-bazlı grupla (y koordinatı +/- 2)
+    lines: list[list[dict]] = []
+    sorted_chars = sorted(chars, key=lambda c: (-c.get("top", 0), c.get("x0", 0)))
+    for c in sorted_chars:
+        if not lines or abs(c.get("top", 0) - lines[-1][0].get("top", 0)) > 3:
+            lines.append([c])
+        else:
+            lines[-1].append(c)
+
+    # Header'ın bulunduğu satırı bul
+    header_kw = [p.split("\\")[0].rstrip("[\\:s*").upper()[:6] for p in HEADER_PATTERNS]
+    header_line_idx = None
+    for i, ln in enumerate(lines):
+        line_text = "".join(c.get("text", "") for c in ln).upper()
+        if any(kw and kw in line_text for kw in ["SAYIN", "ALICI", "MÜŞTER", "MUSTER", "BILL T", "ATTN", "BUYER"]):
+            header_line_idx = i
+            break
+
+    if header_line_idx is None:
+        return _fallback_heuristic(full_text, header_match)
+
+    # Header satırının altındaki BOLD satırları topla
+    bold_lines = []
+    for i in range(header_line_idx + 1, min(header_line_idx + 8, len(lines))):
+        ln = lines[i]
+        if not ln:
+            continue
+        line_text = "".join(c.get("text", "") for c in ln).strip()
+        if not line_text or is_skip(line_text):
+            continue
+        # Çoğunluk bold mu? (>%50)
+        bold_count = sum(1 for c in ln if _is_bold(c.get("fontname", "")))
+        is_bold_line = bold_count >= max(1, len(ln) * 0.5)
+        if is_bold_line:
+            bold_lines.append(line_text)
+        else:
+            break  # bold bitti = adres başladı
+
+    if bold_lines:
+        result = " ".join(bold_lines).strip()
+        # Header kelimesini çıkar (örn. "SAYIN Acme Ltd")
+        for kw in ["SAYIN", "ALICI", "MÜŞTERİ", "MÜŞTER", "BILL TO", "BUYER"]:
+            result = re.sub(rf"^{kw}\s*[:,]?\s*", "", result, flags=re.IGNORECASE).strip()
+        if len(result) >= 3:
+            return result[:200]
+
+    return _fallback_heuristic(full_text, header_match)
+
+
+def _fallback_heuristic(text: str, header_match) -> str | None:
+    """Bold bulunamazsa önceki suffix-based mantık."""
+    after = text[header_match.end():header_match.end() + 600]
+    lines = [l.strip() for l in after.split("\n")]
+    idx0 = None
+    for i, line in enumerate(lines):
+        if not line or is_skip(line) or len(line) > 120:
+            continue
+        idx0 = i
+        break
+    if idx0 is None:
+        return None
+    result = lines[idx0]
+    for j in range(idx0 + 1, min(idx0 + 3, len(lines))):
+        nxt = lines[j]
+        if not nxt:
+            break
+        if ADDRESS_HINT_RE.search(nxt):
+            break
+        if COMPANY_SUFFIX_RE.search(nxt) and len(nxt) <= 80:
+            result = (result + " " + nxt).strip()
+        else:
+            break
+    return result[:200]
+
+
 def extract_customer_from_text(text: str) -> str | None:
-    """PDF text'inden müşteri adı çıkarmaya çalış (multi-line birleştirme dahil)."""
+    """Eski text-based API (geriye dönük). Bold detection için extract_customer_from_pdf kullan."""
     if not text:
         return None
     for pat in HEADER_PATTERNS:
         m = re.search(pat, text, flags=re.IGNORECASE)
-        if not m:
-            continue
-        after = text[m.end():m.end() + 600]
-        lines = [l.strip() for l in after.split("\n")]
-        # İlk anlamlı satırı bul
-        idx0 = None
-        for i, line in enumerate(lines):
-            if not line or is_skip(line) or len(line) > 120:
-                continue
-            idx0 = i
-            break
-        if idx0 is None:
-            continue
-        result = lines[idx0]
-        # Sonraki 1-2 satırı kontrol et — şirket suffix devamı mı?
-        for j in range(idx0 + 1, min(idx0 + 3, len(lines))):
-            nxt = lines[j]
-            if not nxt:
-                break
-            if ADDRESS_HINT_RE.search(nxt):
-                break  # adres satırı geldi, dur
-            if COMPANY_SUFFIX_RE.search(nxt) and len(nxt) <= 80:
-                # Devam eden şirket adı satırı
-                result = (result + " " + nxt).strip()
-            else:
-                break
-        return result[:200]
+        if m:
+            return _fallback_heuristic(text, m)
     return None
 
 
@@ -162,14 +263,10 @@ def main():
                 continue
             try:
                 with pdfplumber.open(pdf_path) as pdf:
-                    text = ""
-                    for page in pdf.pages[:2]:  # ilk 2 sayfa yeter
-                        text += (page.extract_text() or "") + "\n"
+                    name = extract_customer_from_pdf(pdf)
             except Exception as e:
                 print(f"  [{req.id}] PDF okunamadı: {e}")
                 continue
-
-            name = extract_customer_from_text(text)
             if name:
                 ok += 1
                 if not dry_run:
