@@ -105,10 +105,31 @@ export default function OrderDetailPage() {
           const invs = invoicesRes.value.data.invoices || []
           const normTR = (s) => (s || '').replace(/İ/g, 'i').replace(/I/g, 'ı').trim().toLocaleLowerCase('tr-TR')
           const name = normTR(o.RelatedEntity?.Displayname || o.RelatedEntity?.Name || '')
-          const found = invs.find((inv) => {
-            const cn = inv.contact_name_normalized || ''
-            return cn === name || cn.includes(name.slice(0, 20)) || name.includes(cn.slice(0, 20))
-          })
+          const orderDisplay = (o.Displayname || '').trim()
+
+          // 1. Önce sipariş adıyla TAM description eşleşmesi (en güvenilir)
+          let found = null
+          if (orderDisplay) {
+            found = invs.find((inv) => (inv.description || '').trim() === orderDisplay)
+          }
+
+          // 2. Yoksa partial description eşleşmesi (sipariş adı invoice description içinde)
+          if (!found && orderDisplay) {
+            const orderDispNorm = normTR(orderDisplay)
+            found = invs.find((inv) => {
+              const desc = normTR(inv.description || '')
+              return desc && (desc === orderDispNorm || desc.includes(orderDispNorm) || orderDispNorm.includes(desc))
+            })
+          }
+
+          // 3. Yoksa müşteri adıyla eşleşme (eski mantık)
+          if (!found) {
+            found = invs.find((inv) => {
+              const cn = inv.contact_name_normalized || ''
+              return cn === name || cn.includes(name.slice(0, 20)) || name.includes(cn.slice(0, 20))
+            })
+          }
+
           setInvoice(found || null)
         }
       } finally {
