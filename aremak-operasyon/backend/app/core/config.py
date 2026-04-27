@@ -24,6 +24,10 @@ class Settings(BaseSettings):
 
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Hepsiburada webhook (Basic Auth ile gelir)
+    HEPSIBURADA_WEBHOOK_USER: str = ""
+    HEPSIBURADA_WEBHOOK_PASSWORD: str = ""
+
     class Config:
         env_file = ".env"
 
