@@ -132,8 +132,8 @@ def list_shipments(
                 "archive_id": a.id,
                 "is_archive": True,
                 "customer_name": a.alici_adi,
-                "stage": "shipped" if (a.durum or "").lower().startswith("g") else "preparing",
-                "stage_label": a.durum or "—",
+                "stage": "shipped",                  # Arşiv kayıtları tamamlanmış (geçmiş veriler)
+                "stage_label": a.durum or "Sevk Edildi",
                 "delivery_type": a.teslim_sekli,
                 "cargo_company": a.kargo_firmalari,
                 "delivery_address": a.teslimat_adresi,
