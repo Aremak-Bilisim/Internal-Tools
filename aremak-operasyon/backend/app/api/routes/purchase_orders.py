@@ -468,12 +468,22 @@ async def confirm_receipt(
     if not received_items:
         raise HTTPException(400, "Teslim alınmış kalem yok — onay anlamsız")
 
-    # ── Tam teslim: parent'ı güncelle ──
+    # Parent'ı çek (her iki durumda da gerekli)
+    try:
+        parent = await teamgram.get_purchase(tg_purchase_id)
+    except Exception as e:
+        raise HTTPException(502, f"Parent çekilemedi: {e}")
+
+    parent_name = parent.get("Name") or f"#{tg_purchase_id}"
+    # Base name = mevcut "- Teslim DD.MM.YYYY" suffix'i çıkarılmış hali
+    import re as _re
+    base_name = _re.sub(r"\s*-\s*Teslim\s+\d{2}\.\d{2}\.\d{4}\s*$", "", parent_name).strip()
+    today_str = datetime.utcnow().strftime("%d.%m.%Y")
+    delivered_name = f"{base_name} - Teslim {today_str}"
+
+    # ── Tam teslim: parent'ı Edit ile yeniden adlandır + Teslim Alındı yap ──
     if not remaining_items:
-        try:
-            parent = await teamgram.get_purchase(tg_purchase_id)
-        except Exception as e:
-            raise HTTPException(502, f"Parent çekilemedi: {e}")
+        parent["Name"] = delivered_name
         parent["Status"] = 1
         parent["CustomStageId"] = 196789  # Teslim Alındı
         parent["RelatedEntityId"] = (parent.get("RelatedEntity") or {}).get("Id")
@@ -491,13 +501,6 @@ async def confirm_receipt(
         }
 
     # ── Parçalı: 2 child + parent sil ──
-    parent = None
-    try:
-        parent = await teamgram.get_purchase(tg_purchase_id)
-    except Exception as e:
-        raise HTTPException(502, f"Parent çekilemedi: {e}")
-
-    parent_name = parent.get("Name") or f"#{tg_purchase_id}"
     related_id = (parent.get("RelatedEntity") or {}).get("Id")
     attn_id = (parent.get("Attn") or {}).get("Id")
     delivery = parent.get("DeliveryAddress") or DEFAULT_DELIVERY_ADDRESS
@@ -505,9 +508,9 @@ async def confirm_receipt(
     order_date = parent.get("OrderDate") or datetime.utcnow().strftime("%Y-%m-%dT00:00:00")
     description = parent.get("Description")
 
-    # Child A: alınan
+    # Child A: alınan ("base - Teslim DD.MM.YYYY")
     received_payload = {
-        "Name": f"{parent_name} - Teslim Alınan",
+        "Name": delivered_name,
         "OrderDate": order_date,
         "Stage": 0,
         "Status": 1,                       # ClosedReceived
@@ -521,9 +524,9 @@ async def confirm_receipt(
         "Items": [_build_tg_item(it, q) for it, q in received_items],
     }
 
-    # Child B: kalan
+    # Child B: kalan (orijinal base ad)
     remaining_payload = {
-        "Name": f"{parent_name} - Kalan",
+        "Name": base_name,
         "OrderDate": order_date,
         "Stage": 0,
         "Status": 0,                       # OpenRequested
