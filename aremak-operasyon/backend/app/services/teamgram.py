@@ -189,6 +189,11 @@ async def get_purchases(page: int = 1, pagesize: int = 50, party_id: Optional[in
     return await _get(f"{DOMAIN}/Purchases/Index", params)
 
 
+async def get_purchase(purchase_id: int) -> dict:
+    """Tek bir tedarikçi siparişinin detayı."""
+    return await _get(f"{DOMAIN}/Purchases/Get", {"id": purchase_id})
+
+
 async def create_purchase(payload: dict) -> dict:
     """
     Yeni tedarikçi siparişi oluşturur.

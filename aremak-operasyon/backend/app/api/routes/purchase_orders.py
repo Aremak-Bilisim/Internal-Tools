@@ -297,3 +297,74 @@ async def create_purchase(
         "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={purchase_id}" if purchase_id else None,
         "raw": result,
     }
+
+
+# ─── Detay (TG'den) — DİKKAT: Bu route en sonda olmalı (catch-all path param) ─
+@router.get("/{purchase_id}")
+async def get_purchase_order(
+    purchase_id: int,
+    user=Depends(get_current_user),
+):
+    """Tek bir tedarikçi siparişinin TG detayını döner."""
+    try:
+        d = await teamgram.get_purchase(purchase_id)
+    except Exception as e:
+        raise HTTPException(502, f"TG'den sipariş alınamadı: {e}")
+
+    if not d or not d.get("Id"):
+        raise HTTPException(404, "Sipariş bulunamadı")
+
+    items = []
+    for it in (d.get("Items") or []):
+        prod = it.get("Product") or {}
+        items.append({
+            "item_id": it.get("ItemId"),
+            "tg_product_id": prod.get("Id"),
+            "brand": prod.get("Brand"),
+            "prod_model": prod.get("ProdModel"),
+            "displayname": prod.get("Displayname"),
+            "sku": prod.get("Sku"),
+            "quantity": it.get("Quantity"),
+            "unit": it.get("Unit"),
+            "unit_price": it.get("Price"),
+            "line_total": it.get("LineTotal"),
+            "currency": it.get("CurrencyName"),
+            "vat": it.get("Vat"),
+            "description": it.get("Description"),
+        })
+
+    related = d.get("RelatedEntity") or {}
+    attn = d.get("Attn") or {}
+    owner = d.get("Owner") or {}
+
+    return {
+        "id": d.get("Id"),
+        "name": d.get("Name"),
+        "displayname": d.get("Displayname"),
+        "order_date": (d.get("OrderDate") or "")[:10],
+        "stage_name": d.get("CustomStageName"),
+        "stage_id": d.get("CustomStageId"),
+        "status": d.get("Status"),
+        "total": d.get("DiscountedTotal"),
+        "currency": d.get("CurrencyName"),
+        "supplier": {
+            "id": related.get("Id"),
+            "name": related.get("Name") or related.get("Displayname"),
+        },
+        "contact": {
+            "id": attn.get("Id"),
+            "name": attn.get("Displayname") or f"{attn.get('Name') or ''} {attn.get('LastName') or ''}".strip(),
+        },
+        "owner": {
+            "id": owner.get("Id"),
+            "name": owner.get("Displayname"),
+        },
+        "delivery_address": d.get("DeliveryAddress"),
+        "billing_address": d.get("BillingAddress"),
+        "supplier_address": d.get("SupplierAddress"),
+        "description": d.get("Description"),
+        "entered_date": d.get("EnteredDate"),
+        "modified_date": d.get("ModifiedDate"),
+        "items": items,
+        "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={d.get('Id')}",
+    }

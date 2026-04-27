@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Table, Tag, Button, Typography, Space, Spin, message } from 'antd'
-import { PlusOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, ExportOutlined, EyeOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -39,7 +39,9 @@ export default function PurchaseOrdersListPage() {
     {
       title: 'Sipariş Adı', dataIndex: 'name', key: 'name',
       render: (v, r) => (
-        <a href={r.tg_url} target="_blank" rel="noreferrer">{v || '-'}</a>
+        <a onClick={() => navigate(`/purchase-orders/${r.id}`)} style={{ cursor: 'pointer' }}>
+          {v || '-'}
+        </a>
       ),
     },
     { title: 'Tedarikçi', dataIndex: 'supplier', key: 'supplier' },
@@ -68,17 +70,16 @@ export default function PurchaseOrdersListPage() {
       sorter: (a, b) => (a.total || 0) - (b.total || 0),
     },
     {
-      title: '', key: 'actions', width: 120,
+      title: '', key: 'actions', width: 200,
       render: (_, r) => (
-        <Button
-          size="small"
-          icon={<ExportOutlined />}
-          href={r.tg_url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          TG'de Aç
-        </Button>
+        <Space size="small">
+          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/purchase-orders/${r.id}`)}>
+            Detay
+          </Button>
+          <Button size="small" icon={<ExportOutlined />} href={r.tg_url} target="_blank" rel="noreferrer">
+            TG
+          </Button>
+        </Space>
       ),
     },
   ]
