@@ -51,6 +51,7 @@ class CreatePurchaseIn(BaseModel):
     supplier: str = "Hikrobot"
     name: str                   # Sipariş adı (örn. "Hikrobot Proforma A2603...")
     po_no: Optional[str] = None
+    order_date: Optional[str] = None    # YYYY-MM-DD; boşsa bugün
     delivery_address: str = DEFAULT_DELIVERY_ADDRESS
     billing_address: str = DEFAULT_DELIVERY_ADDRESS
     currency: str = "USD"
@@ -86,6 +87,7 @@ async def parse_pdf(
     return {
         "supplier": parsed["supplier"],
         "po_no": parsed["po_no"],
+        "order_date": parsed.get("order_date"),
         "currency": parsed["currency"],
         "doc_total_quantity": parsed.get("doc_total_quantity"),
         "doc_total_amount": parsed.get("doc_total_amount"),
@@ -221,9 +223,10 @@ async def create_purchase(
         raise HTTPException(400, f"'{data.supplier}' tedarikçisi henüz desteklenmiyor")
 
     # TG payload'unu hazırla
+    order_date_str = (data.order_date or datetime.utcnow().strftime("%Y-%m-%d")) + "T00:00:00"
     payload = {
         "Name": data.name,
-        "OrderDate": datetime.utcnow().strftime("%Y-%m-%dT00:00:00"),
+        "OrderDate": order_date_str,
         "Stage": 0,
         "Status": 0,                                # Talep Edildi
         "CustomStageId": URETIM_BEKLENIYOR_STAGE_ID,

@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
 import {
   Card, Upload, Button, Typography, Space, Spin, message, Table, Tag, Input, InputNumber,
-  Descriptions, Select, Form, Modal, Alert,
+  Descriptions, Select, Form, Modal, Alert, DatePicker,
 } from 'antd'
 import { InboxOutlined, FilePdfOutlined, CheckCircleOutlined, CloseCircleOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import dayjs from 'dayjs'
 import api from '../services/api'
 
 const { Title, Text } = Typography
@@ -16,6 +17,7 @@ export default function PurchaseOrderNewPage() {
   const [parsed, setParsed] = useState(null)   // { supplier, po_no, items, total_*, currency }
   const [items, setItems] = useState([])       // editable items with `match`
   const [poName, setPoName] = useState('')
+  const [orderDate, setOrderDate] = useState(null)  // dayjs
   const [deliveryAddress, setDeliveryAddress] = useState(
     'Mustafa Kemal Mah. Dumlupınar Blv. No: 280G İç Kapı No:1260 Çankaya/Ankara'
   )
@@ -39,6 +41,7 @@ export default function PurchaseOrderNewPage() {
       setParsed(data)
       setItems(data.items || [])
       setPoName(`Hikrobot - ${data.po_no || file.name}`)
+      setOrderDate(data.order_date ? dayjs(data.order_date) : dayjs())
       message.success(`PDF parse edildi (${data.items?.length || 0} ürün)`)
     } catch (e) {
       message.error(e?.response?.data?.detail || 'PDF parse edilemedi')
@@ -109,6 +112,7 @@ export default function PurchaseOrderNewPage() {
         supplier: parsed.supplier || 'Hikrobot',
         name: poName,
         po_no: parsed.po_no || null,
+        order_date: orderDate ? orderDate.format('YYYY-MM-DD') : null,
         delivery_address: deliveryAddress,
         billing_address: deliveryAddress,
         currency: parsed.currency || 'USD',
@@ -267,13 +271,23 @@ export default function PurchaseOrderNewPage() {
             </Descriptions>
 
             <Form layout="vertical" style={{ marginTop: 16 }}>
-              <Form.Item label="Sipariş Adı" required>
-                <Input
-                  value={poName}
-                  onChange={(e) => setPoName(e.target.value)}
-                  placeholder="Hikrobot - A2603..."
-                />
-              </Form.Item>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Form.Item label="Sipariş Adı" required style={{ flex: 1 }}>
+                  <Input
+                    value={poName}
+                    onChange={(e) => setPoName(e.target.value)}
+                    placeholder="Hikrobot - A2603..."
+                  />
+                </Form.Item>
+                <Form.Item label="Sipariş Tarihi" required style={{ width: 200 }}>
+                  <DatePicker
+                    value={orderDate}
+                    onChange={setOrderDate}
+                    format="DD.MM.YYYY"
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+              </div>
               <Form.Item label="Teslimat ve Fatura Adresi">
                 <Input.TextArea
                   rows={2}
@@ -363,7 +377,7 @@ export default function PurchaseOrderNewPage() {
 
           {/* Aksiyonlar */}
           <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button onClick={() => { setParsed(null); setItems([]); setPoName('') }}>
+            <Button onClick={() => { setParsed(null); setItems([]); setPoName(''); setOrderDate(null) }}>
               Yeniden Yükle
             </Button>
             <Button

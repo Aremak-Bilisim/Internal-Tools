@@ -108,6 +108,17 @@ def parse_proforma(file_bytes: bytes) -> dict:
     if m:
         po_no = m.group(1)
 
+    # Sipariş tarihi (DATE: 2026-03-12)
+    order_date = None
+    dm = re.search(r"DATE\s*[:：]\s*(\d{4}-\d{1,2}-\d{1,2})", full_text, re.IGNORECASE)
+    if dm:
+        # Normalize to YYYY-MM-DD
+        try:
+            from datetime import datetime as _dt
+            order_date = _dt.strptime(dm.group(1), "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            order_date = dm.group(1)
+
     # Para birimi (Amount(USD) ipucu) — varsayılan USD
     currency = "USD" if "USD" in full_text else "USD"
 
@@ -126,6 +137,7 @@ def parse_proforma(file_bytes: bytes) -> dict:
     return {
         "supplier": detect_supplier(full_text),
         "po_no": po_no,
+        "order_date": order_date,
         "items": items,
         "items_total_quantity": items_total_qty,
         "items_total_amount": items_total_amount,
