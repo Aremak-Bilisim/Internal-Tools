@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Table, Tag, Button, Typography, Space, Spin, message } from 'antd'
-import { PlusOutlined, ReloadOutlined, ExportOutlined, EyeOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, ExportOutlined, EyeOutlined, FilePdfOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -61,6 +61,14 @@ export default function PurchaseOrdersListPage() {
         const s = STATUS_LABELS[v]
         return s ? <Tag color={s.color}>{s.label}</Tag> : '-'
       },
+    },
+    {
+      title: 'Belge', dataIndex: 'document_url', key: 'document_url', width: 80, align: 'center',
+      render: (url, r) => url
+        ? <a href={url} target="_blank" rel="noreferrer" title={r.document_name || 'Proforma PDF'}>
+            <FilePdfOutlined style={{ fontSize: 18, color: '#ff4d4f' }} />
+          </a>
+        : <span style={{ color: '#ccc' }}>—</span>,
     },
     {
       title: 'Toplam Tutar (KDV Hariç)', dataIndex: 'total', key: 'total', width: 180, align: 'right',

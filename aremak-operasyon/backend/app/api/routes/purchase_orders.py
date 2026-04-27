@@ -12,7 +12,15 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.product import Product
 from app.models.purchase_match import PurchaseMatch
+from app.models.purchase_document import PurchaseDocument
 from app.services import pdf_parser, teamgram
+
+import os
+import uuid as _uuid
+from fastapi.responses import FileResponse
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "purchase_orders")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def _normalize_pdf_name(name: str) -> str:
@@ -61,6 +69,7 @@ class CreatePurchaseIn(BaseModel):
 # ─── Liste (TG'den) ──────────────────────────────────────────────────
 @router.get("/list")
 async def list_purchase_orders(
+    db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """Hikrobot'un TG'deki tedarikçi siparişlerini listeler.
@@ -78,6 +87,10 @@ async def list_purchase_orders(
     detail_tasks = [teamgram.get_purchase(p.get("Id")) for p in list_rows if p.get("Id")]
     details = await asyncio.gather(*detail_tasks, return_exceptions=True)
 
+    # Lokal PDF kayıtlarını çek
+    tg_ids = [p.get("Id") for p in list_rows if p.get("Id")]
+    docs = {d.tg_purchase_id: d for d in db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id.in_(tg_ids)).all()}
+
     items = []
     for p, d in zip(list_rows, details):
         # Detay başarısızsa fallback olarak TG total'ı kullan
@@ -89,6 +102,7 @@ async def list_purchase_orders(
             if tg_items:
                 item_currency = tg_items[0].get("CurrencyName")
 
+        doc = docs.get(p.get("Id"))
         items.append({
             "id": p.get("Id"),
             "name": p.get("Name") or p.get("Displayname"),
@@ -101,6 +115,8 @@ async def list_purchase_orders(
             "supplier": (p.get("RelatedEntity") or {}).get("Name"),
             "modified_date": (p.get("ModifiedDate") or "")[:10],
             "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={p.get('Id')}",
+            "document_url": doc.file_url if doc else None,
+            "document_name": doc.original_name if doc else None,
         })
     return {"items": items, "count": len(items)}
 
@@ -215,6 +231,56 @@ def search_products(
     return [_product_to_match_dict(p) for p in rows]
 
 
+# ─── PDF Belge Yükleme (lokal storage) ───────────────────────────────
+@router.post("/{tg_purchase_id}/document")
+async def upload_purchase_document(
+    tg_purchase_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Tedarikçi siparişine ait Proforma PDF'ini lokal sunucuya kaydeder.
+    (TG attachment-type custom field'ı API'dan set edilemediği için lokal saklıyoruz.)"""
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Sadece PDF kabul edilir")
+
+    content = await file.read()
+
+    # Dosya adı: purchase_<tg_id>_<uuid>.pdf
+    fname = f"purchase_{tg_purchase_id}_{_uuid.uuid4().hex[:8]}.pdf"
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    with open(fpath, "wb") as f:
+        f.write(content)
+
+    file_url = f"/uploads/purchase_orders/{fname}"
+
+    # DB'de upsert
+    existing = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == tg_purchase_id).first()
+    if existing:
+        # Eski dosyayı sil
+        try:
+            old_path = os.path.join(UPLOAD_DIR, os.path.basename(existing.file_url))
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        except Exception:
+            pass
+        existing.file_url = file_url
+        existing.original_name = file.filename
+        existing.content_type = file.content_type or "application/pdf"
+        existing.size = len(content)
+    else:
+        existing = PurchaseDocument(
+            tg_purchase_id=tg_purchase_id,
+            file_url=file_url,
+            original_name=file.filename,
+            content_type=file.content_type or "application/pdf",
+            size=len(content),
+        )
+        db.add(existing)
+    db.commit()
+    return {"ok": True, "file_url": file_url, "original_name": existing.original_name}
+
+
 # ─── Manuel Eşleşmeyi Kaydet (gelecek PDF'ler için) ──────────────────
 class SaveMatchIn(BaseModel):
     pdf_name: str
@@ -321,6 +387,7 @@ async def create_purchase(
 @router.get("/{purchase_id}")
 async def get_purchase_order(
     purchase_id: int,
+    db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """Tek bir tedarikçi siparişinin TG detayını döner."""
@@ -331,6 +398,9 @@ async def get_purchase_order(
 
     if not d or not d.get("Id"):
         raise HTTPException(404, "Sipariş bulunamadı")
+
+    # Lokal PDF
+    doc = db.query(PurchaseDocument).filter(PurchaseDocument.tg_purchase_id == purchase_id).first()
 
     items = []
     for it in (d.get("Items") or []):
@@ -385,4 +455,6 @@ async def get_purchase_order(
         "modified_date": d.get("ModifiedDate"),
         "items": items,
         "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={d.get('Id')}",
+        "document_url": doc.file_url if doc else None,
+        "document_name": doc.original_name if doc else None,
     }

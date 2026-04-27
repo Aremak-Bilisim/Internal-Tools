@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Card, Descriptions, Tag, Button, Typography, Space, Spin, message, Table } from 'antd'
-import { ArrowLeftOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ExportOutlined, ReloadOutlined, FilePdfOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -94,6 +94,18 @@ export default function PurchaseOrderDetailPage() {
             }
             extra={
               <Space>
+                {po.document_url && (
+                  <Button
+                    size="small"
+                    icon={<FilePdfOutlined />}
+                    href={po.document_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
+                  >
+                    Proforma PDF
+                  </Button>
+                )}
                 <Button size="small" icon={<ReloadOutlined />} onClick={load}>Yenile</Button>
                 <Button size="small" icon={<ExportOutlined />} href={po.tg_url} target="_blank" rel="noreferrer">
                   TG'de Aç

@@ -16,6 +16,7 @@ export default function PurchaseOrderNewPage() {
   const [parsing, setParsing] = useState(false)
   const [parsed, setParsed] = useState(null)   // { supplier, po_no, items, total_*, currency }
   const [items, setItems] = useState([])       // editable items with `match`
+  const [pdfFile, setPdfFile] = useState(null) // sipariş oluştururken yüklenecek orijinal PDF
   const [poName, setPoName] = useState('')
   const [orderDate, setOrderDate] = useState(null)  // dayjs
   const [deliveryAddress, setDeliveryAddress] = useState(
@@ -31,6 +32,7 @@ export default function PurchaseOrderNewPage() {
     setParsing(true)
     setParsed(null)
     setItems([])
+    setPdfFile(null)
     const fd = new FormData()
     fd.append('file', file)
     try {
@@ -42,6 +44,7 @@ export default function PurchaseOrderNewPage() {
       setItems(data.items || [])
       setPoName(`Hikrobot - ${data.po_no || file.name}`)
       setOrderDate(data.order_date ? dayjs(data.order_date) : dayjs())
+      setPdfFile(file)  // orijinal PDF'i sakla — sipariş yaratıldıktan sonra yüklenecek
       message.success(`PDF parse edildi (${data.items?.length || 0} ürün)`)
     } catch (e) {
       message.error(e?.response?.data?.detail || 'PDF parse edilemedi')
@@ -128,17 +131,35 @@ export default function PurchaseOrderNewPage() {
         })),
       }
       const res = await api.post('/purchase-orders/create', payload)
+      const tgPurchaseId = res.data.tg_purchase_id
+
+      // PDF'i de yükle
+      let docUploaded = false
+      if (tgPurchaseId && pdfFile) {
+        try {
+          const fd = new FormData()
+          fd.append('file', pdfFile)
+          await api.post(`/purchase-orders/${tgPurchaseId}/document`, fd, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          })
+          docUploaded = true
+        } catch {
+          message.warning('Sipariş oluşturuldu ama PDF kaydedilemedi')
+        }
+      }
+
       Modal.success({
         title: 'Tedarikçi siparişi oluşturuldu',
         content: (
           <div>
             <p>TeamGram'da başarıyla kaydedildi.</p>
+            {docUploaded && <p>✓ Proforma PDF lokal olarak saklandı.</p>}
             {res.data.tg_url && (
               <a href={res.data.tg_url} target="_blank" rel="noreferrer">TG'de görüntüle</a>
             )}
           </div>
         ),
-        onOk: () => navigate('/'),
+        onOk: () => navigate('/purchase-orders'),
       })
     } catch (e) {
       message.error(e?.response?.data?.detail || 'TG kaydı başarısız')
