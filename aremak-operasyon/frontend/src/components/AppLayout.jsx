@@ -20,7 +20,7 @@ import api from '../services/api'
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
 
-const menuItems = [
+const buildMenuItems = (role) => [
   { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/products', icon: <InboxOutlined />, label: 'Ürünler' },
   {
@@ -29,6 +29,7 @@ const menuItems = [
     label: 'Siparişler',
     children: [
       { key: '/orders', icon: <ShoppingCartOutlined />, label: 'Müşteri Siparişleri' },
+      ...(role === 'admin' ? [{ key: '/purchase-orders/new', icon: <PlusOutlined />, label: 'Tedarikçi Siparişi' }] : []),
     ],
   },
   {
@@ -157,7 +158,7 @@ export default function AppLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           defaultOpenKeys={['siparisler', 'sevkiyatlar', 'musteri']}
-          items={menuItems}
+          items={buildMenuItems(user?.role)}
           onClick={({ key }) => { if (key.startsWith('/')) navigate(key) }}
           style={{ marginTop: 8 }}
         />

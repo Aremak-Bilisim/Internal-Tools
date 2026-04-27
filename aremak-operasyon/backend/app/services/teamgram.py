@@ -185,6 +185,18 @@ async def get_purchases(page: int = 1, pagesize: int = 50) -> dict:
     return await _get(f"{DOMAIN}/Purchases/Index", {"page": page, "pagesize": pagesize})
 
 
+async def create_purchase(payload: dict) -> dict:
+    """
+    Yeni tedarikçi siparişi oluşturur.
+    payload örneği için PURCHASE_CREATE_TEMPLATE'e bak.
+    """
+    url = f"{BASE}/{DOMAIN}/Purchases/Create"
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(url, headers=HEADERS, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
 async def get_product_inventory(product_id: int) -> dict:
     return await _get(f"{DOMAIN}/Products/InventoryOfEntity", {"entityId": product_id})
 
