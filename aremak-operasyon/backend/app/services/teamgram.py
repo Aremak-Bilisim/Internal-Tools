@@ -181,8 +181,12 @@ async def get_companies_by_vkn(vkn: str, company_name: Optional[str] = None) -> 
 
 
 
-async def get_purchases(page: int = 1, pagesize: int = 50) -> dict:
-    return await _get(f"{DOMAIN}/Purchases/Index", {"page": page, "pagesize": pagesize})
+async def get_purchases(page: int = 1, pagesize: int = 50, party_id: Optional[int] = None) -> dict:
+    """Tedarikçi siparişleri listesi. party_id verilirse sadece o tedarikçinin siparişleri."""
+    params = {"page": page, "pagesize": pagesize}
+    if party_id:
+        params["fid_party"] = party_id
+    return await _get(f"{DOMAIN}/Purchases/Index", params)
 
 
 async def create_purchase(payload: dict) -> dict:

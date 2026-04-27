@@ -29,7 +29,7 @@ const buildMenuItems = (role) => [
     label: 'Siparişler',
     children: [
       { key: '/orders', icon: <ShoppingCartOutlined />, label: 'Müşteri Siparişleri' },
-      ...(role === 'admin' ? [{ key: '/purchase-orders/new', icon: <PlusOutlined />, label: 'Tedarikçi Siparişi' }] : []),
+      ...(role === 'admin' ? [{ key: '/purchase-orders', icon: <ShoppingCartOutlined />, label: 'Tedarikçi Siparişleri' }] : []),
     ],
   },
   {

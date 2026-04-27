@@ -58,6 +58,35 @@ class CreatePurchaseIn(BaseModel):
     items: list[PurchaseItemIn]
 
 
+# ─── Liste (TG'den) ──────────────────────────────────────────────────
+@router.get("/list")
+async def list_purchase_orders(
+    user=Depends(get_current_user),
+):
+    """Hikrobot'un TG'deki tedarikçi siparişlerini listeler."""
+    try:
+        data = await teamgram.get_purchases(page=1, pagesize=50, party_id=HIKROBOT_COMPANY_ID)
+    except Exception as e:
+        raise HTTPException(502, f"TG'den siparişler alınamadı: {e}")
+
+    items = []
+    for p in (data.get("List") or []):
+        items.append({
+            "id": p.get("Id"),
+            "name": p.get("Name") or p.get("Displayname"),
+            "displayname": p.get("Displayname"),
+            "order_date": (p.get("OrderDate") or "")[:10],
+            "stage_name": p.get("CustomStageName"),
+            "status": p.get("Status"),
+            "total": p.get("DiscountedTotal"),
+            "currency": p.get("CurrencyName"),
+            "supplier": (p.get("RelatedEntity") or {}).get("Name"),
+            "modified_date": (p.get("ModifiedDate") or "")[:10],
+            "tg_url": f"https://www.teamgram.com/aremak/purchases/show?id={p.get('Id')}",
+        })
+    return {"items": items, "count": len(items)}
+
+
 # ─── PDF Parse + Eşleştirme ──────────────────────────────────────────
 @router.post("/parse-pdf")
 async def parse_pdf(
