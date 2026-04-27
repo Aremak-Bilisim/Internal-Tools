@@ -42,6 +42,8 @@ export default function PurchaseOrderDetailPage() {
   const status = STATUS_LABELS[po.status]
   const grandTotal = po.items.reduce((s, it) => s + (Number(it.line_total) || 0), 0)
   const totalQty = po.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+  // Para birimi: kalemlerden al (TG'nin sipariş seviyesindeki CurrencyName=TL olabiliyor)
+  const itemCurrency = po.items[0]?.currency || po.currency
 
   const itemColumns = [
     { title: '#', key: 'idx', width: 40, render: (_, __, i) => i + 1 },
@@ -70,8 +72,6 @@ export default function PurchaseOrderDetailPage() {
         ? <Text strong>{`${Number(v).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${r.currency || ''}`}</Text>
         : '-',
     },
-    { title: 'KDV %', dataIndex: 'vat', key: 'vat', width: 70, align: 'right',
-      render: (v) => v != null ? `${v}%` : '-' },
   ]
 
   return (
@@ -105,13 +105,11 @@ export default function PurchaseOrderDetailPage() {
               <Descriptions.Item label="Tedarikçi">{po.supplier?.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="İlgili Kişi">{po.contact?.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Sipariş Tarihi">{po.order_date || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Para Birimi">{po.currency || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Para Birimi">{itemCurrency || '-'}</Descriptions.Item>
               <Descriptions.Item label="Oluşturan">{po.owner?.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Toplam Tutar">
                 <Text strong>
-                  {po.total != null
-                    ? `${Number(po.total).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${po.currency || ''}`
-                    : '-'}
+                  {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {itemCurrency || ''}
                 </Text>
               </Descriptions.Item>
               <Descriptions.Item label="Teslimat Adresi" span={2}>{po.delivery_address || '-'}</Descriptions.Item>
@@ -144,10 +142,9 @@ export default function PurchaseOrderDetailPage() {
                     <Table.Summary.Cell index={4} />
                     <Table.Summary.Cell index={5} align="right">
                       <Text strong>
-                        {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {po.currency || ''}
+                        {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {itemCurrency || ''}
                       </Text>
                     </Table.Summary.Cell>
-                    <Table.Summary.Cell index={6} />
                   </Table.Summary.Row>
                 </Table.Summary>
               )}
