@@ -174,6 +174,10 @@ def extract_customer_from_pdf(pdf) -> str | None:
         # Header kelimesini çıkar (örn. "SAYIN Acme Ltd")
         for kw in ["SAYIN", "ALICI", "MÜŞTERİ", "MÜŞTER", "BILL TO", "BUYER"]:
             result = re.sub(rf"^{kw}\s*[:,]?\s*", "", result, flags=re.IGNORECASE).strip()
+        # Cleanup: VKN/TCKN (10-11 hane sayılar), parantez içerikleri (vergi dairesi vs.)
+        result = re.sub(r"\b\d{10,11}\b", "", result)        # VKN/TCKN
+        result = re.sub(r"\([^)]*\)", "", result)              # (vergi dairesi)
+        result = re.sub(r"\s+", " ", result).strip()           # fazla boşluk
         if len(result) >= 3:
             return result[:200]
 
