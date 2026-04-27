@@ -107,7 +107,7 @@ export default function PurchaseOrderDetailPage() {
               <Descriptions.Item label="Sipariş Tarihi">{po.order_date || '-'}</Descriptions.Item>
               <Descriptions.Item label="Para Birimi">{itemCurrency || '-'}</Descriptions.Item>
               <Descriptions.Item label="Oluşturan">{po.owner?.name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Toplam Tutar">
+              <Descriptions.Item label="Toplam Tutar (KDV Hariç)">
                 <Text strong>
                   {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {itemCurrency || ''}
                 </Text>
@@ -134,7 +134,7 @@ export default function PurchaseOrderDetailPage() {
               summary={() => (
                 <Table.Summary fixed>
                   <Table.Summary.Row style={{ background: '#fafafa' }}>
-                    <Table.Summary.Cell index={0} colSpan={2}><Text strong>TOPLAM</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={0} colSpan={2}><Text strong>TOPLAM (KDV Hariç)</Text></Table.Summary.Cell>
                     <Table.Summary.Cell index={2} align="right">
                       <Text strong>{totalQty.toLocaleString('tr-TR')}</Text>
                     </Table.Summary.Cell>
