@@ -40,6 +40,7 @@ export default function PurchaseOrdersListPage() {
       title: 'Sipariş Adı', dataIndex: 'name', key: 'name',
       render: (v, r) => (
         <Space size={6}>
+          {r.parent_id && <span style={{ color: '#bfbfbf', fontSize: 14, marginRight: 4 }}>└</span>}
           <a onClick={() => navigate(`/purchase-orders/${r.id}`)} style={{ cursor: 'pointer' }}>
             {v || '-'}
           </a>
@@ -124,7 +125,7 @@ export default function PurchaseOrdersListPage() {
           loading={loading}
           pagination={{ pageSize: 20 }}
           size="small"
-          expandable={{ defaultExpandAllRows: true, indentSize: 24 }}
+          expandable={{ defaultExpandAllRows: true, indentSize: 48 }}
           locale={{ emptyText: loading ? <Spin /> : 'Henüz sipariş yok' }}
         />
       </Card>
