@@ -228,8 +228,28 @@ def find_invoice_file(req: ArchiveShipmentRequest) -> Path | None:
     return full if full.exists() else None
 
 
+def debug_pdf(pdf_path: Path):
+    """PDF içeriğini ekrana yazdır (fontname dahil)."""
+    print(f"\n=== DEBUG: {pdf_path} ===")
+    with pdfplumber.open(pdf_path) as pdf:
+        for pi, page in enumerate(pdf.pages[:2]):
+            text = page.extract_text() or ""
+            print(f"\n--- Sayfa {pi+1} TEXT (ilk 800 char) ---")
+            print(text[:800])
+            chars = page.chars or []
+            print(f"\n--- Sayfa {pi+1} CHARS ({len(chars)} adet) — örnek 30 ---")
+            for c in chars[:30]:
+                print(f"  '{c.get('text','?')}' font={c.get('fontname','?')} top={c.get('top',0):.1f}")
+            # Fontname dağılımı
+            fonts = set(c.get('fontname') for c in chars)
+            print(f"\n--- Unique fonts ({len(fonts)}): ---")
+            for f in sorted(fonts, key=lambda x: x or ""):
+                print(f"  {f}")
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
+    debug = "--debug" in sys.argv
     # --id <archive_id>  → tek kayıt test
     single_id = None
     if "--id" in sys.argv:
@@ -261,6 +281,8 @@ def main():
             if not pdf_path:
                 no_pdf += 1
                 continue
+            if debug:
+                debug_pdf(pdf_path)
             try:
                 with pdfplumber.open(pdf_path) as pdf:
                     name = extract_customer_from_pdf(pdf)
