@@ -19,7 +19,8 @@ class ArchivePurchaseOrder(Base):
     total = Column(Float, nullable=True)
     currency = Column(String, nullable=True)                            # 'USD' | 'EUR'
     is_received = Column(Boolean, default=False)                        # Evet/Kısmen Evet -> True, Hayır -> False
-    knack_pdf_url = Column(String, nullable=True)
+    knack_pdf_url = Column(String, nullable=True)                       # Orijinal Knack URL (referans)
+    local_pdf_url = Column(String, nullable=True)                       # Sunucuda saklanan kopya (önceliklendirilir)
     knack_record_id = Column(String, unique=True, index=True, nullable=False)  # Idempotency için
     imported_at = Column(DateTime(timezone=True), server_default=func.now())
 

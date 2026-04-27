@@ -27,6 +27,14 @@ def _run_migrations():
         if "sample_id" not in notif_cols:
             conn.execute(text("ALTER TABLE notifications ADD COLUMN sample_id INTEGER REFERENCES sample_requests(id)"))
             conn.commit()
+        # archive_purchase_orders.local_pdf_url
+        try:
+            archive_cols = {c["name"] for c in insp.get_columns("archive_purchase_orders")}
+            if "local_pdf_url" not in archive_cols:
+                conn.execute(text("ALTER TABLE archive_purchase_orders ADD COLUMN local_pdf_url VARCHAR"))
+                conn.commit()
+        except Exception:
+            pass  # tablo yoksa create_all yaratir
 
 _run_migrations()
 
