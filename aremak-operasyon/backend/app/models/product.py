@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -7,7 +8,7 @@ class Product(Base):
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, index=True)
-    tg_id = Column(Integer, unique=True, index=True, nullable=False)
+    tg_id = Column(Integer, unique=True, index=True, nullable=True)  # Pending'lerde yok, onay sonrası dolar
 
     brand = Column(String, index=True, nullable=True)
     prod_model = Column(String, index=True, nullable=True)
@@ -38,5 +39,10 @@ class Product(Base):
     parasut_id = Column(String, nullable=True, index=True)  # Paraşüt ürün ID (eşleşince dolar)
     datasheet_url = Column(String, nullable=True)           # TG CustomFieldId 193440 (Datasheet)
     shelf = Column(String, nullable=True, index=True)       # TG CustomFieldId 193563 (Raf)
+
+    # Onay akışı (sales/warehouse ürün ekleyince admin onayı bekler)
+    pending_approval = Column(Boolean, default=False, index=True)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by = relationship("User", foreign_keys=[created_by_id])
 
     synced_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

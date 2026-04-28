@@ -10,6 +10,7 @@ import {
   DeleteOutlined, FilePdfOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import { useAuthStore } from '../store/auth'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -84,6 +85,8 @@ function formatPrice(price, currency) {
 }
 
 export default function ProductsPage() {
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -103,6 +106,16 @@ export default function ProductsPage() {
   // Categories & brands
   const [categories, setCategories] = useState({ parents: [], children: [] })
   const [brands, setBrands] = useState([])
+
+  // Pending (sales/warehouse basit form + admin onay)
+  const [pendingDrawerOpen, setPendingDrawerOpen] = useState(false)
+  const [pendingForm] = Form.useForm()
+  const [pendingSubmitting, setPendingSubmitting] = useState(false)
+  const [approveDrawerOpen, setApproveDrawerOpen] = useState(false)
+  const [approveForm] = Form.useForm()
+  const [approveRecord, setApproveRecord] = useState(null)
+  const [approveSubmitting, setApproveSubmitting] = useState(false)
+  const [approveParentCat, setApproveParentCat] = useState(null)
 
   // Create drawer
   const [createOpen, setCreateOpen] = useState(false)
@@ -345,8 +358,13 @@ export default function ProductsPage() {
       title: 'Marka',
       dataIndex: 'brand',
       key: 'brand',
-      width: 120,
-      render: (v) => <Text strong>{v || '-'}</Text>,
+      width: 160,
+      render: (v, r) => (
+        <Space size={4}>
+          <Text strong>{v || '-'}</Text>
+          {r.pending_approval && <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px' }}>Onay Bekliyor</Tag>}
+        </Space>
+      ),
     },
     {
       title: 'Model',
@@ -459,6 +477,72 @@ export default function ProductsPage() {
     ? categories.children.filter(c => c.parent_id === parentCatFilter)
     : categories.children
 
+  // ── Pending action card ──
+  const pendingItems = (data.items || []).filter((r) => r.pending_approval)
+
+  const openApproveDrawer = (record) => {
+    setApproveRecord(record)
+    setApproveParentCat(null)
+    approveForm.resetFields()
+    approveForm.setFieldsValue({
+      brand: record.brand,
+      prod_model: record.prod_model,
+      price: record.price,
+      currency_name: record.currency_name || 'USD',
+      purchase_price: record.purchase_price,
+      purchase_currency_name: record.purchase_currency_name || 'USD',
+      vat: record.vat ?? 20,
+      unit: record.unit || 'adet',
+      details: record.details,
+      sku: '',
+    })
+    setApproveDrawerOpen(true)
+  }
+
+  const submitPending = async () => {
+    try {
+      const values = await pendingForm.validateFields()
+      setPendingSubmitting(true)
+      await api.post('/products/pending', values)
+      message.success('Ürün onay için yöneticiye gönderildi')
+      setPendingDrawerOpen(false)
+      fetchData()
+    } catch (e) {
+      if (e?.errorFields) return
+      message.error(e?.response?.data?.detail || 'Hata')
+    } finally {
+      setPendingSubmitting(false)
+    }
+  }
+
+  const submitApprove = async () => {
+    try {
+      const values = await approveForm.validateFields()
+      setApproveSubmitting(true)
+      await api.post(`/products/${approveRecord.id}/approve`, values)
+      message.success('Ürün onaylandı ve TG\'ye yazıldı')
+      setApproveDrawerOpen(false)
+      fetchData()
+    } catch (e) {
+      if (e?.errorFields) return
+      message.error(e?.response?.data?.detail || 'Onaylama başarısız')
+    } finally {
+      setApproveSubmitting(false)
+    }
+  }
+
+  const rejectApprove = async () => {
+    if (!approveRecord) return
+    try {
+      await api.post(`/products/${approveRecord.id}/reject`)
+      message.warning('Ürün talebi reddedildi')
+      setApproveDrawerOpen(false)
+      fetchData()
+    } catch (e) {
+      message.error('Reddedilemedi')
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -472,11 +556,55 @@ export default function ProductsPage() {
           <Button icon={<ReloadOutlined />} loading={parasutSyncing} onClick={handleParasutSync}>
             Paraşüt Sync
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+            if (isAdmin) {
+              openCreate()
+            } else {
+              pendingForm.resetFields()
+              pendingForm.setFieldsValue({ currency_name: 'USD', purchase_currency_name: 'USD', vat: 20, unit: 'adet' })
+              setPendingDrawerOpen(true)
+            }
+          }}>
             Yeni Ürün
           </Button>
         </Space>
       </div>
+
+      {/* Admin: Onay Bekleyen ürünler aksiyon kartı */}
+      {isAdmin && pendingItems.length > 0 && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 18px',
+          background: '#fffbe6',
+          border: '1px solid #ffe58f',
+          borderLeft: '4px solid #faad14',
+          borderRadius: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Text strong style={{ color: '#d46b08', fontSize: 14 }}>
+              ⚡ {pendingItems.length} ürün onayınızı bekliyor
+            </Text>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pendingItems.map((p) => (
+              <div key={p.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: '#fff', borderRadius: 6, padding: '8px 12px',
+                border: '1px solid #ffd591',
+              }}>
+                <Text style={{ fontSize: 13 }}>
+                  <Text strong>{p.brand}</Text>
+                  <Text> · {p.prod_model}</Text>
+                  {p.created_by_name && <Text type="secondary" style={{ marginLeft: 8, fontSize: 11 }}>(Oluşturan: {p.created_by_name})</Text>}
+                </Text>
+                <Button type="primary" ghost size="small" icon={<CheckCircleOutlined />} onClick={() => openApproveDrawer(p)}>
+                  Onayla
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Card>
         {/* Filters */}
@@ -544,7 +672,7 @@ export default function ProductsPage() {
         <Table
           dataSource={data.items}
           columns={columns}
-          rowKey="tg_id"
+          rowKey="id"
           loading={loading}
           pagination={{
             current: page,
@@ -949,6 +1077,180 @@ export default function ProductsPage() {
                 </Descriptions.Item>
               )}
             </Descriptions>
+          </>
+        )}
+      </Drawer>
+
+      {/* ── Pending Drawer (Sales/Warehouse) ── */}
+      <Drawer
+        title="Yeni Ürün Talebi"
+        open={pendingDrawerOpen}
+        onClose={() => setPendingDrawerOpen(false)}
+        width={520}
+        footer={
+          <Space style={{ float: 'right' }}>
+            <Button onClick={() => setPendingDrawerOpen(false)}>İptal</Button>
+            <Button type="primary" loading={pendingSubmitting} onClick={submitPending}>
+              Onaya Gönder
+            </Button>
+          </Space>
+        }
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+          Ürün admin onayına gönderilecek. Onaylandığında SKU + kategori atanır ve TG'ye yazılır.
+        </Text>
+        <Form form={pendingForm} layout="vertical">
+          <Form.Item name="brand" label="Marka" rules={[{ required: true }]}>
+            <AutoComplete options={brands.map(b => ({ value: b }))} placeholder="Hikrobot, Computar, …" />
+          </Form.Item>
+          <Form.Item name="prod_model" label="Model" rules={[{ required: true }]}>
+            <Input placeholder="MV-CU020-90GM" />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={16}>
+              <Form.Item name="price" label="Satış Fiyatı">
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} precision={2} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="currency_name" label="Para Birimi">
+                <Select options={[{ value: 'USD' }, { value: 'EUR' }, { value: 'TL' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={16}>
+              <Form.Item name="purchase_price" label="Alış Fiyatı">
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} precision={2} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="purchase_currency_name" label="Para Birimi">
+                <Select options={[{ value: 'USD' }, { value: 'EUR' }, { value: 'TL' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="vat" label="KDV (%)">
+                <InputNumber style={{ width: '100%' }} min={0} max={100} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="unit" label="Birim">
+                <Select options={[{ value: 'adet' }, { value: 'set' }, { value: 'metre' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="details" label="Açıklama">
+            <TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Drawer>
+
+      {/* ── Approve Drawer (Admin) ── */}
+      <Drawer
+        title={`Onay: ${approveRecord?.brand || ''} - ${approveRecord?.prod_model || ''}`}
+        open={approveDrawerOpen}
+        onClose={() => setApproveDrawerOpen(false)}
+        width={620}
+        footer={
+          <Space style={{ float: 'right' }}>
+            <Popconfirm title="Bu ürün talebini reddet?" onConfirm={rejectApprove} okText="Reddet" okButtonProps={{ danger: true }} cancelText="Vazgeç">
+              <Button danger>Reddet</Button>
+            </Popconfirm>
+            <Button onClick={() => setApproveDrawerOpen(false)}>Kapat</Button>
+            <Button type="primary" loading={approveSubmitting} onClick={submitApprove}>
+              Onayla ve TG'ye Yaz
+            </Button>
+          </Space>
+        }
+      >
+        {approveRecord && (
+          <>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              Oluşturan: <Text strong>{approveRecord.created_by_name || '-'}</Text>
+              · Bu formdaki tüm değerleri düzenleyebilirsiniz. SKU ve kategori onayda atanmalı.
+            </Text>
+            <Form form={approveForm} layout="vertical">
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="brand" label="Marka" rules={[{ required: true }]}>
+                    <AutoComplete options={brands.map(b => ({ value: b }))} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="prod_model" label="Model" rules={[{ required: true }]}>
+                    <Input />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item label="Ana Kategori" required>
+                    <Select
+                      placeholder="Seç..."
+                      value={approveParentCat}
+                      onChange={(v) => { setApproveParentCat(v); approveForm.setFieldValue('category_id', undefined) }}
+                      options={categories.parents.map(p => ({ value: p.id, label: p.name }))}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="category_id" label="Alt Kategori" rules={[{ required: true }]}>
+                    <Select
+                      placeholder="Seç..."
+                      disabled={!approveParentCat}
+                      options={categories.children
+                        .filter(c => c.parent_id === approveParentCat)
+                        .map(c => ({ value: c.id, label: c.name }))}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item name="sku" label="SKU" rules={[{ required: true }]}>
+                <Input placeholder="ARMK-..." />
+              </Form.Item>
+              <Row gutter={12}>
+                <Col span={16}>
+                  <Form.Item name="price" label="Satış Fiyatı">
+                    <InputNumber style={{ width: '100%' }} min={0} step={0.01} precision={2} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="currency_name" label="Para Birimi">
+                    <Select options={[{ value: 'USD' }, { value: 'EUR' }, { value: 'TL' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={16}>
+                  <Form.Item name="purchase_price" label="Alış Fiyatı">
+                    <InputNumber style={{ width: '100%' }} min={0} step={0.01} precision={2} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="purchase_currency_name" label="Para Birimi">
+                    <Select options={[{ value: 'USD' }, { value: 'EUR' }, { value: 'TL' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="vat" label="KDV (%)">
+                    <InputNumber style={{ width: '100%' }} min={0} max={100} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="unit" label="Birim">
+                    <Select options={[{ value: 'adet' }, { value: 'set' }, { value: 'metre' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item name="details" label="Açıklama">
+                <TextArea rows={2} />
+              </Form.Item>
+            </Form>
           </>
         )}
       </Drawer>

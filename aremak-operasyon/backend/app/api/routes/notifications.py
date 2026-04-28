@@ -26,6 +26,7 @@ def get_notifications(
             "message": n.message,
             "shipment_id": n.shipment_id,
             "sample_id": n.sample_id,
+            "product_id": n.product_id,
             "is_read": n.is_read,
             "created_at": n.created_at.isoformat() if n.created_at else None,
         }

@@ -27,6 +27,9 @@ def _run_migrations():
         if "sample_id" not in notif_cols:
             conn.execute(text("ALTER TABLE notifications ADD COLUMN sample_id INTEGER REFERENCES sample_requests(id)"))
             conn.commit()
+        if "product_id" not in notif_cols:
+            conn.execute(text("ALTER TABLE notifications ADD COLUMN product_id INTEGER REFERENCES products(id)"))
+            conn.commit()
         # archive_purchase_orders ek kolonlar
         try:
             archive_cols = {c["name"] for c in insp.get_columns("archive_purchase_orders")}
@@ -38,11 +41,17 @@ def _run_migrations():
                 conn.commit()
         except Exception:
             pass  # tablo yoksa create_all yaratir
-        # products.shelf
+        # products.shelf + pending_approval + created_by_id
         try:
             prod_cols = {c["name"] for c in insp.get_columns("products")}
             if "shelf" not in prod_cols:
                 conn.execute(text("ALTER TABLE products ADD COLUMN shelf VARCHAR"))
+                conn.commit()
+            if "pending_approval" not in prod_cols:
+                conn.execute(text("ALTER TABLE products ADD COLUMN pending_approval BOOLEAN DEFAULT 0"))
+                conn.commit()
+            if "created_by_id" not in prod_cols:
+                conn.execute(text("ALTER TABLE products ADD COLUMN created_by_id INTEGER REFERENCES users(id)"))
                 conn.commit()
         except Exception:
             pass

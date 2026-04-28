@@ -3,10 +3,12 @@ from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.product import Product
+from app.models.user import User
+from app.models.notification import Notification
 from app.services import teamgram
 from app.services import product_sync
 from app.services import parasut as parasut_svc
@@ -21,6 +23,13 @@ PARASUT_COMPANY = settings.PARASUT_COMPANY_ID
 
 
 def _to_dict(p: Product) -> dict:
+    creator_name = None
+    if p.created_by_id:
+        # not lazy-loaded by default; safe access via attribute if available
+        try:
+            creator_name = p.created_by.name if getattr(p, "created_by", None) else None
+        except Exception:
+            creator_name = None
     return {
         "id": p.id,
         "tg_id": p.tg_id,
@@ -42,11 +51,14 @@ def _to_dict(p: Product) -> dict:
         "critical_inventory": p.critical_inventory,
         "details": p.details,
         "not_available": p.not_available,
-        "tg_url": f"https://www.teamgram.com/{TG_DOMAIN}/products/show?id={p.tg_id}",
+        "tg_url": f"https://www.teamgram.com/{TG_DOMAIN}/products/show?id={p.tg_id}" if p.tg_id else None,
         "parasut_url": f"https://uygulama.parasut.com/{PARASUT_COMPANY}/hizmet-ve-urunler/{p.parasut_id}" if p.parasut_id else None,
         "parasut_id": p.parasut_id,
         "datasheet_url": p.datasheet_url,
         "shelf": p.shelf,
+        "pending_approval": bool(p.pending_approval),
+        "created_by_id": p.created_by_id,
+        "created_by_name": creator_name,
     }
 
 
@@ -136,7 +148,180 @@ async def trigger_parasut_sync(
     return {"message": "Paraşüt eşleştirme başlatıldı"}
 
 
-# ── CREATE ────────────────────────────────────────────────────────────────────
+# ── PENDING (Sales / Warehouse / Admin tümü kullanabilir) ────────────────────
+
+class ProductPendingCreate(BaseModel):
+    brand: str
+    prod_model: str
+    price: Optional[float] = None
+    currency_name: Optional[str] = "TL"
+    purchase_price: Optional[float] = None
+    purchase_currency_name: Optional[str] = "TL"
+    vat: Optional[int] = 20
+    unit: Optional[str] = "adet"
+    details: Optional[str] = None
+
+
+@router.post("/pending")
+def create_pending_product(
+    body: ProductPendingCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Sales/Warehouse: basit form. Lokal'e pending olarak kaydedilir, TG'ye yazılmaz.
+    Admin'lere bildirim gider."""
+    p = Product(
+        tg_id=None,
+        brand=body.brand.strip(),
+        prod_model=body.prod_model.strip(),
+        price=body.price,
+        currency_name=(body.currency_name or "TL").upper(),
+        purchase_price=body.purchase_price,
+        purchase_currency_name=(body.purchase_currency_name or "TL").upper(),
+        vat=body.vat,
+        unit=(body.unit or "adet"),
+        details=body.details,
+        pending_approval=True,
+        created_by_id=current_user.id,
+        no_inventory=False,
+        inventory=0.0,
+        not_available=False,
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+
+    # Admin'lere bildirim
+    admins = db.query(User).filter(User.role == "admin").all()
+    for a in admins:
+        n = Notification(
+            user_id=a.id,
+            title="Yeni ürün onay bekliyor",
+            message=f"{current_user.name}: {p.brand} - {p.prod_model}",
+            product_id=p.id,
+        )
+        db.add(n)
+    db.commit()
+
+    return _to_dict(p)
+
+
+class ProductApprove(BaseModel):
+    sku: str
+    category_id: int                        # alt kategori (level 1)
+    # Admin tüm alanları gözden geçirebilir / değiştirebilir:
+    brand: Optional[str] = None
+    prod_model: Optional[str] = None
+    price: Optional[float] = None
+    currency_name: Optional[str] = None
+    purchase_price: Optional[float] = None
+    purchase_currency_name: Optional[str] = None
+    vat: Optional[int] = None
+    unit: Optional[str] = None
+    details: Optional[str] = None
+
+
+@router.post("/{product_id}/approve")
+async def approve_product(
+    product_id: int,
+    body: ProductApprove,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin")),
+):
+    """Admin: pending ürünü onaylar. TG'de yaratır, tg_id'yi alır, pending=False yapar."""
+    p = db.query(Product).filter(Product.id == product_id, Product.pending_approval == True).first()
+    if not p:
+        raise HTTPException(404, "Pending ürün bulunamadı")
+
+    # Admin override
+    if body.brand: p.brand = body.brand.strip()
+    if body.prod_model: p.prod_model = body.prod_model.strip()
+    if body.price is not None: p.price = body.price
+    if body.currency_name: p.currency_name = body.currency_name.upper()
+    if body.purchase_price is not None: p.purchase_price = body.purchase_price
+    if body.purchase_currency_name: p.purchase_currency_name = body.purchase_currency_name.upper()
+    if body.vat is not None: p.vat = body.vat
+    if body.unit: p.unit = body.unit
+    if body.details is not None: p.details = body.details
+    p.sku = body.sku.strip()
+    p.category_id = body.category_id
+    db.flush()
+
+    # TG'de yarat
+    payload = {
+        "Brand": p.brand,
+        "ProdModel": p.prod_model,
+        "Sku": p.sku,
+        "Price": p.price or 0.0,
+        "CurrencyId": CURRENCY_NAME_TO_ID.get((p.currency_name or "TL").upper(), 1),
+        "PurchasePrice": p.purchase_price or 0.0,
+        "PurchaseCurrencyId": CURRENCY_NAME_TO_ID.get((p.purchase_currency_name or "TL").upper(), 1),
+        "Details": p.details or "",
+        "CategoryId": p.category_id or 0,
+        "Unit": p.unit or "adet",
+        "Vat": p.vat or 20,
+        "NoInventory": False,
+        "CriticalInventory": 0,
+        "NotAvaliable": False,
+        "WritersIdToString": ["0|WholeCompany"],
+        "ReadersIdToString": [],
+        "OwnerId": 0,
+    }
+    result = await teamgram.create_product(payload)
+    if not result.get("Result") or not result.get("Id"):
+        raise HTTPException(502, f"TG'de oluşturulamadı: {result}")
+
+    p.tg_id = result["Id"]
+    p.pending_approval = False
+    db.commit()
+    # Sync ile diğer alanları (kategori adı, parent vs.) doldur
+    try:
+        await product_sync.sync_one(p.tg_id)
+    except Exception:
+        pass
+
+    # Oluşturana bildirim
+    if p.created_by_id:
+        db.add(Notification(
+            user_id=p.created_by_id,
+            title="Ürünün onaylandı",
+            message=f"{p.brand} - {p.prod_model} (SKU: {p.sku})",
+            product_id=p.id,
+        ))
+        db.commit()
+
+    db.refresh(p)
+    return _to_dict(p)
+
+
+@router.post("/{product_id}/reject")
+def reject_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin")),
+):
+    """Admin: pending ürünü reddeder (sil). Oluşturana bildirim gider."""
+    p = db.query(Product).filter(Product.id == product_id, Product.pending_approval == True).first()
+    if not p:
+        raise HTTPException(404, "Pending ürün bulunamadı")
+
+    creator_id = p.created_by_id
+    label = f"{p.brand} - {p.prod_model}"
+    db.delete(p)
+    db.commit()
+
+    if creator_id:
+        db.add(Notification(
+            user_id=creator_id,
+            title="Ürün talebin reddedildi",
+            message=label,
+        ))
+        db.commit()
+
+    return {"ok": True}
+
+
+# ── CREATE (Admin tam form) ───────────────────────────────────────────────────
 
 class ProductCreate(BaseModel):
     brand: str
