@@ -394,10 +394,17 @@ async def reject_product(
     label = f"{p.brand} - {p.prod_model}"
     tg_id = p.tg_id
 
-    # TG'de varsa sil (best-effort)
+    # TG'de varsa pasifleştir + Onay-Bekliyor tag'i kaldır
+    # (TG Products/Delete API silme işlemini kabul etmiyor; soft-delete yapıyoruz)
     if tg_id:
         try:
-            await teamgram.delete_product(tg_id)
+            edit_payload = await teamgram.get_product_edit_payload(tg_id)
+            current_tags = edit_payload.get("Tags") or []
+            new_tags = [t for t in current_tags if (t if isinstance(t, str) else (t.get("Name") if isinstance(t, dict) else "")) != PENDING_TAG]
+            edit_payload["NotAvaliable"] = True
+            edit_payload["Tags"] = new_tags if new_tags else None
+            edit_payload["CategoryId"] = edit_payload.get("CategoryId") or 0
+            await teamgram.edit_product(edit_payload)
         except Exception:
             pass
 
