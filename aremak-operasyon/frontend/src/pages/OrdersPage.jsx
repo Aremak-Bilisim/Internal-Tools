@@ -349,6 +349,12 @@ export default function OrdersPage() {
     setDrawerLoading(true)
     setDrawerItems([])
     setExistingIrsaliyes([])
+
+    // Drawer açılırken Paraşüt fatura cache'ini tazele — yeni oluşturulan
+    // faturalar (taslak dahil) anında auto-match'e dahil olur
+    api.post('/parasut/invoices/refresh')
+      .then(res => buildInvoiceMaps(res.data.invoices))
+      .catch(() => { /* sessiz fail; mevcut cache kullanılır */ })
     form.resetFields()
     form.setFieldsValue({
       customer_name: customerName,
