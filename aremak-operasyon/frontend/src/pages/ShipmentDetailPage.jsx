@@ -86,6 +86,13 @@ export default function ShipmentDetailPage() {
   const [editIrsaliyes, setEditIrsaliyes] = useState([])
   const [editIrsaliyesLoading, setEditIrsaliyesLoading] = useState(false)
 
+  // Manual match (Fatura / İrsaliye) — pending_admin & parasut_review aşamalarında
+  const [matchModal, setMatchModal] = useState({ open: false, type: null }) // type: 'invoice' | 'irsaliye'
+  const [matchList, setMatchList] = useState([])
+  const [matchLoading, setMatchLoading] = useState(false)
+  const [matchSelected, setMatchSelected] = useState(null)
+  const [matchSubmitting, setMatchSubmitting] = useState(false)
+
   const load = () => {
     setLoading(true)
     api.get(`/shipments/${id}`)
@@ -337,6 +344,55 @@ export default function ShipmentDetailPage() {
       setUploadingPhotos(false)
     }
   }
+
+  const openMatchModal = async (type) => {
+    const taxNo = (order?.RelatedEntity?.TaxNo || '').trim()
+    setMatchModal({ open: true, type })
+    setMatchList([])
+    setMatchSelected(null)
+    if (!taxNo) {
+      message.warning('TG siparişinde VKN yok, eşleştirme yapılamaz')
+      return
+    }
+    setMatchLoading(true)
+    try {
+      const path = type === 'invoice' ? 'invoices/by-vkn' : 'irsaliyes/by-vkn'
+      const r = await api.get(`/parasut/${path}?vkn=${encodeURIComponent(taxNo)}`)
+      setMatchList(type === 'invoice' ? (r.data?.invoices || []) : (r.data?.irsaliyes || []))
+    } catch (e) {
+      message.error('Liste alınamadı')
+    } finally {
+      setMatchLoading(false)
+    }
+  }
+
+  const submitMatch = async () => {
+    if (!matchSelected) {
+      message.error('Bir kayıt seçin')
+      return
+    }
+    setMatchSubmitting(true)
+    try {
+      if (matchModal.type === 'invoice') {
+        const inv = matchList.find(i => i.id === matchSelected)
+        await api.post(`/shipments/${id}/match-invoice`, {
+          invoice_id: matchSelected,
+          invoice_no: inv?.invoice_no || null,
+        })
+      } else {
+        await api.post(`/shipments/${id}/match-irsaliye`, { irsaliye_id: matchSelected })
+      }
+      message.success('Eşleştirildi')
+      setMatchModal({ open: false, type: null })
+      load()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Eşleştirme başarısız')
+    } finally {
+      setMatchSubmitting(false)
+    }
+  }
+
+  const canManualMatch = ['pending_admin', 'parasut_review'].includes(shipment?.stage) && ['admin', 'warehouse'].includes(user?.role)
 
   const deleteInvoice = async () => {
     setDeletingInvoice(true)
@@ -738,7 +794,15 @@ export default function ShipmentDetailPage() {
           })()}
 
           {/* Fatura (Paraşüt) */}
-          <Card title="Fatura (Paraşüt)" size="small">
+          <Card
+            title="Fatura (Paraşüt)"
+            size="small"
+            extra={canManualMatch && (
+              <Button size="small" onClick={() => openMatchModal('invoice')}>
+                {shipment.invoice_url ? 'Faturayı Değiştir' : 'Fatura Eşleştir'}
+              </Button>
+            )}
+          >
             {shipment.invoice_url || shipment.invoice_no ? (
               <>
                 <Descriptions column={2} size="small">
@@ -792,8 +856,20 @@ export default function ShipmentDetailPage() {
           </Card>
 
           {/* İrsaliye (Paraşüt) */}
-          {shipment.irsaliye_id && (
-            <Card title="İrsaliye (Paraşüt)" size="small">
+          {(shipment.irsaliye_id || canManualMatch) && (
+            <Card
+              title="İrsaliye (Paraşüt)"
+              size="small"
+              extra={canManualMatch && (
+                <Button size="small" onClick={() => openMatchModal('irsaliye')}>
+                  {shipment.irsaliye_id ? 'İrsaliyeyi Değiştir' : 'İrsaliye Eşleştir'}
+                </Button>
+              )}
+            >
+              {!shipment.irsaliye_id && (
+                <Text type="secondary">Bu sevk talebi için irsaliye kaydı yok.</Text>
+              )}
+              {shipment.irsaliye_id && (
               <Descriptions column={2} size="small">
                 {irsaliye?.contact_name && (
                   <Descriptions.Item label="Müşteri" span={2}>{irsaliye.contact_name}</Descriptions.Item>
@@ -833,6 +909,7 @@ export default function ShipmentDetailPage() {
                   Paraşüt'te Görüntüle
                 </Button>
               </div>
+              )}
             </Card>
           )}
 
@@ -1185,6 +1262,42 @@ export default function ShipmentDetailPage() {
           </Form.Item>
         </Form>
       </Drawer>
+
+      {/* Manuel eşleştirme modal'ı (Fatura / İrsaliye) */}
+      <Modal
+        title={matchModal.type === 'invoice' ? 'Fatura Eşleştir' : 'İrsaliye Eşleştir'}
+        open={matchModal.open}
+        onCancel={() => setMatchModal({ open: false, type: null })}
+        onOk={submitMatch}
+        okText="Eşleştir"
+        cancelText="İptal"
+        confirmLoading={matchSubmitting}
+        width={680}
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          VKN: <Text code>{order?.RelatedEntity?.TaxNo || '-'}</Text>
+        </Text>
+        {matchLoading ? (
+          <Spin />
+        ) : matchList.length === 0 ? (
+          <Text type="secondary">Bu cariye ait kayıt bulunamadı.</Text>
+        ) : (
+          <Select
+            style={{ width: '100%' }}
+            placeholder="Bir kayıt seçin..."
+            value={matchSelected}
+            onChange={setMatchSelected}
+            showSearch
+            optionFilterProp="label"
+            options={matchList.map(it => ({
+              value: it.id,
+              label: matchModal.type === 'invoice'
+                ? `${it.issue_date || '-'} • ${it.invoice_no || 'TASLAK'} • ${it.gross_total ? `${it.gross_total} ${it.currency || ''}` : ''} ${it.description ? `• ${it.description}` : ''}`.trim()
+                : `${it.issue_date || '-'} • ${it.gross_total ? `${it.gross_total} TL` : ''} ${it.description ? `• ${it.description}` : ''}`.trim(),
+            }))}
+          />
+        )}
+      </Modal>
     </div>
   )
 }

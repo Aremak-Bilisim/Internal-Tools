@@ -623,6 +623,36 @@ async def search_contact_by_tax_number(tax_number: str) -> Optional[str]:
     return None
 
 
+async def list_invoices_by_contact_id(contact_id: str, page_size: int = 30) -> list:
+    """Bir cariye ait satış faturalarını tarihe göre azalan döner.
+    Liste elemanı: {id, invoice_no, issue_date, gross_total, currency, description, status, url}"""
+    if not contact_id:
+        return []
+    try:
+        data = await _api_get("sales_invoices", {
+            "filter[contact_id]": contact_id,
+            "sort": "-issue_date",
+            "page[size]": min(page_size, 50),
+        })
+    except Exception as e:
+        logger.warning(f"Paraşüt fatura listesi alınamadı (contact={contact_id}): {e}")
+        return []
+    out = []
+    for it in data.get("data", []):
+        attrs = it.get("attributes", {}) or {}
+        out.append({
+            "id": it.get("id"),
+            "invoice_no": attrs.get("invoice_no") or attrs.get("invoice_id"),
+            "issue_date": attrs.get("issue_date"),
+            "gross_total": attrs.get("gross_total"),
+            "currency": attrs.get("currency"),
+            "description": attrs.get("description"),
+            "status": attrs.get("status"),
+            "url": f"https://uygulama.parasut.com/{COMPANY}/satislar/{it.get('id')}",
+        })
+    return out
+
+
 async def list_irsaliyes_by_contact_id(contact_id: str, page_size: int = 30) -> list:
     """Paraşüt'te bir cariye ait irsaliyeleri (shipment_documents) tarihe göre azalan sıralı döner.
     Liste elemanı: {id, issue_date, item_type, net_total, gross_total, status, url}"""

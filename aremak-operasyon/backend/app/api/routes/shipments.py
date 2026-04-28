@@ -552,6 +552,64 @@ def advance_stage(
     return _shipment_to_dict(s)
 
 
+class MatchInvoice(BaseModel):
+    invoice_id: str
+    invoice_no: Optional[str] = None
+
+
+class MatchIrsaliye(BaseModel):
+    irsaliye_id: str
+
+
+_MATCH_ALLOWED_STAGES = ("pending_admin", "parasut_review")
+
+
+@router.post("/{shipment_id}/match-invoice")
+def match_invoice(
+    shipment_id: int,
+    data: MatchInvoice,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "warehouse")),
+):
+    """Sevk talebine Paraşüt faturasını manuel eşleştir.
+    Sadece pending_admin / parasut_review aşamalarında izinli."""
+    from app.core.config import settings as _s
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    if s.stage not in _MATCH_ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="Bu aşamada fatura eşleştirilemez")
+    if not data.invoice_id:
+        raise HTTPException(status_code=400, detail="invoice_id gerekli")
+    s.invoice_url = f"https://uygulama.parasut.com/{_s.PARASUT_COMPANY_ID}/satislar/{data.invoice_id}"
+    s.invoice_no = data.invoice_no
+    db.commit()
+    db.refresh(s)
+    return _shipment_to_dict(s)
+
+
+@router.post("/{shipment_id}/match-irsaliye")
+def match_irsaliye(
+    shipment_id: int,
+    data: MatchIrsaliye,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "warehouse")),
+):
+    """Sevk talebine Paraşüt irsaliyesini manuel eşleştir.
+    Sadece pending_admin / parasut_review aşamalarında izinli."""
+    s = db.query(ShipmentRequest).filter(ShipmentRequest.id == shipment_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sevk talebi bulunamadı")
+    if s.stage not in _MATCH_ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="Bu aşamada irsaliye eşleştirilemez")
+    if not data.irsaliye_id:
+        raise HTTPException(status_code=400, detail="irsaliye_id gerekli")
+    s.irsaliye_id = data.irsaliye_id
+    db.commit()
+    db.refresh(s)
+    return _shipment_to_dict(s)
+
+
 @router.delete("/{shipment_id}/invoice")
 def delete_shipment_invoice(
     shipment_id: int,
