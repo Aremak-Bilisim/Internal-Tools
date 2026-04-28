@@ -202,6 +202,23 @@ async def create_opportunity(payload: dict) -> dict:
         return r.json()
 
 
+async def edit_order(payload: dict) -> dict:
+    """TG müşteri siparişini günceller (Items dahil tam payload bekler)."""
+    import json as _json
+    url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
+    body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(url, headers=headers, content=body)
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_order_full(order_id: int) -> dict:
+    """v1 Orders/Get raw response."""
+    return await _get_v1(f"{DOMAIN}/Orders/Get", {"id": order_id})
+
+
 async def delete_order(order_id: int) -> dict:
     """Müşteri siparişini siler (split child temizliği için)."""
     url = f"{BASE}/aremak/Orders/Delete?id={order_id}"

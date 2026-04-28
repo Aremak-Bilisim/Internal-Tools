@@ -237,6 +237,45 @@ async def create_hepsiburada_shipment(
         raise HTTPException(502, f"TG'de sipariş oluşturulamadı: {ord_res}")
     tg_order_id = ord_res["Id"]
 
+    # 3a. Order'i opp'a bagla (Create sirasinda RelatedEntityIds bazen tutmuyor — Edit ile pekistiriyoruz)
+    try:
+        ord_full = await teamgram.get_order_full(tg_order_id)
+        edit_items = []
+        for it in (ord_full.get("Items") or []):
+            edit_items.append({
+                "Product": {"Id": (it.get("Product") or {}).get("Id")},
+                "Quantity": it.get("Quantity") or 0,
+                "Price": it.get("Price") or 0,
+                "CurrencyName": it.get("CurrencyName") or "TL",
+                "Vat": it.get("Vat") or 20,
+                "Unit": it.get("Unit") or "adet",
+                "Description": it.get("Description") or "",
+                "DiscountType": 0, "Discount": 0,
+            })
+        edit_payload = {
+            "Id": tg_order_id,
+            "Name": ord_full.get("Name"),
+            "OrderDate": ord_full.get("OrderDate"),
+            "ScheduledFulfilment": ord_full.get("ScheduledFulfilment"),
+            "RelatedEntityId": (ord_full.get("RelatedEntity") or {}).get("Id"),
+            "RelatedEntityIds": str(tg_opp_id),
+            "Status": "ClosedFulfilled",
+            "Stage": ord_full.get("Stage", 0),
+            "CustomStageId": ord_full.get("CustomStageId"),
+            "CurrencyName": ord_full.get("CurrencyName") or "TL",
+            "DeliveryAddress": ord_full.get("DeliveryAddress") or "",
+            "BillingAddress": ord_full.get("BillingAddress") or "",
+            "Description": ord_full.get("Description") or "",
+            "Tags": ord_full.get("Tags") or [],
+            "OwnerId": (ord_full.get("Owner") or {}).get("Id") or 0,
+            "Items": edit_items,
+            "CustomFieldDatas": [],
+            "VatType": ord_full.get("VatType") or 0,
+        }
+        await teamgram.edit_order(edit_payload)
+    except Exception as e:
+        logger.warning(f"Order'i opp'a baglarken hata (kritik degil): {e}")
+
     # 4. Lokal Shipment kaydı (stage=preparing — admin/parasut adımları atlanır)
     s = ShipmentRequest(
         tg_order_id=tg_order_id,
