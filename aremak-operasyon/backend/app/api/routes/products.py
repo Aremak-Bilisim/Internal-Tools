@@ -150,6 +150,9 @@ async def trigger_parasut_sync(
 
 # ── PENDING (Sales / Warehouse / Admin tümü kullanabilir) ────────────────────
 
+PENDING_TAG = "Onay-Bekliyor"
+
+
 class ProductPendingCreate(BaseModel):
     brand: str
     prod_model: str
@@ -162,18 +165,63 @@ class ProductPendingCreate(BaseModel):
     details: Optional[str] = None
 
 
+@router.get("/pending")
+def list_pending_products(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Onay bekleyen ürünlerin listesi (sayfalamadan bağımsız — aksiyon kartı için)."""
+    rows = db.query(Product).filter(Product.pending_approval == True).order_by(Product.id.desc()).all()
+    return [_to_dict(p) for p in rows]
+
+
 @router.post("/pending")
-def create_pending_product(
+async def create_pending_product(
     body: ProductPendingCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Sales/Warehouse: basit form. Lokal'e pending olarak kaydedilir, TG'ye yazılmaz.
-    Admin'lere bildirim gider."""
+    """Sales/Warehouse: basit form. TG'ye placeholder SKU + 'Onay-Bekliyor' tag ile yaratılır,
+    lokal'de pending=True olarak kaydedilir. Admin'lere bildirim gider."""
+    brand = body.brand.strip()
+    prod_model = body.prod_model.strip()
+    placeholder_sku = f"PENDING-{int(__import__('time').time())}"
+
+    payload = {
+        "Brand": brand,
+        "ProdModel": prod_model,
+        "Sku": placeholder_sku,
+        "Price": body.price or 0.0,
+        "CurrencyId": CURRENCY_NAME_TO_ID.get((body.currency_name or "TL").upper(), 1),
+        "PurchasePrice": body.purchase_price or 0.0,
+        "PurchaseCurrencyId": CURRENCY_NAME_TO_ID.get((body.purchase_currency_name or "TL").upper(), 1),
+        "Details": body.details or "",
+        "CategoryId": 0,
+        "Unit": body.unit or "adet",
+        "Vat": body.vat or 20,
+        "NoInventory": False,
+        "CriticalInventory": 0,
+        "NotAvaliable": False,
+        "WritersIdToString": ["0|WholeCompany"],
+        "ReadersIdToString": [],
+        "OwnerId": 0,
+        "Tags": [PENDING_TAG],
+    }
+
+    tg_id = None
+    try:
+        result = await teamgram.create_product(payload)
+        if result.get("Result") and result.get("Id"):
+            tg_id = result["Id"]
+    except Exception as e:
+        # TG'ye yazılamasa da lokal kayıt yine düşsün — admin onayda fixleyebilir
+        pass
+
     p = Product(
-        tg_id=None,
-        brand=body.brand.strip(),
-        prod_model=body.prod_model.strip(),
+        tg_id=tg_id,
+        brand=brand,
+        prod_model=prod_model,
+        sku=placeholder_sku if tg_id else None,
         price=body.price,
         currency_name=(body.currency_name or "TL").upper(),
         purchase_price=body.purchase_price,
@@ -228,7 +276,8 @@ async def approve_product(
     db: Session = Depends(get_db),
     current_user=Depends(require_role("admin")),
 ):
-    """Admin: pending ürünü onaylar. TG'de yaratır, tg_id'yi alır, pending=False yapar."""
+    """Admin: pending ürünü onaylar. TG'de daha önce placeholder ile yaratıldıysa Edit eder,
+    yoksa yeni Create eder. 'Onay-Bekliyor' tag'i kaldırılır."""
     p = db.query(Product).filter(Product.id == product_id, Product.pending_approval == True).first()
     if not p:
         raise HTTPException(404, "Pending ürün bulunamadı")
@@ -247,31 +296,54 @@ async def approve_product(
     p.category_id = body.category_id
     db.flush()
 
-    # TG'de yarat
-    payload = {
-        "Brand": p.brand,
-        "ProdModel": p.prod_model,
-        "Sku": p.sku,
-        "Price": p.price or 0.0,
-        "CurrencyId": CURRENCY_NAME_TO_ID.get((p.currency_name or "TL").upper(), 1),
-        "PurchasePrice": p.purchase_price or 0.0,
-        "PurchaseCurrencyId": CURRENCY_NAME_TO_ID.get((p.purchase_currency_name or "TL").upper(), 1),
-        "Details": p.details or "",
-        "CategoryId": p.category_id or 0,
-        "Unit": p.unit or "adet",
-        "Vat": p.vat or 20,
-        "NoInventory": False,
-        "CriticalInventory": 0,
-        "NotAvaliable": False,
-        "WritersIdToString": ["0|WholeCompany"],
-        "ReadersIdToString": [],
-        "OwnerId": 0,
-    }
-    result = await teamgram.create_product(payload)
-    if not result.get("Result") or not result.get("Id"):
-        raise HTTPException(502, f"TG'de oluşturulamadı: {result}")
+    if p.tg_id:
+        # TG'de mevcut: Edit ile fields güncelle ve tag'i kaldır
+        try:
+            current = await teamgram.get_product(p.tg_id)
+            current_tags = current.get("Tags") or []
+            new_tags = [t for t in current_tags if t and t != PENDING_TAG]
+            edit_payload = current
+            edit_payload["Brand"] = p.brand
+            edit_payload["ProdModel"] = p.prod_model
+            edit_payload["Sku"] = p.sku
+            edit_payload["Price"] = p.price or 0.0
+            edit_payload["CurrencyId"] = CURRENCY_NAME_TO_ID.get((p.currency_name or "TL").upper(), 1)
+            edit_payload["PurchasePrice"] = p.purchase_price or 0.0
+            edit_payload["PurchaseCurrencyId"] = CURRENCY_NAME_TO_ID.get((p.purchase_currency_name or "TL").upper(), 1)
+            edit_payload["Details"] = p.details or ""
+            edit_payload["CategoryId"] = p.category_id or 0
+            edit_payload["Unit"] = p.unit or "adet"
+            edit_payload["Vat"] = p.vat or 20
+            edit_payload["Tags"] = new_tags
+            await teamgram.edit_product(edit_payload)
+        except Exception as e:
+            raise HTTPException(502, f"TG güncellenemedi: {e}")
+    else:
+        # TG'de yok (önceki create başarısızdı): yeni Create
+        payload = {
+            "Brand": p.brand,
+            "ProdModel": p.prod_model,
+            "Sku": p.sku,
+            "Price": p.price or 0.0,
+            "CurrencyId": CURRENCY_NAME_TO_ID.get((p.currency_name or "TL").upper(), 1),
+            "PurchasePrice": p.purchase_price or 0.0,
+            "PurchaseCurrencyId": CURRENCY_NAME_TO_ID.get((p.purchase_currency_name or "TL").upper(), 1),
+            "Details": p.details or "",
+            "CategoryId": p.category_id or 0,
+            "Unit": p.unit or "adet",
+            "Vat": p.vat or 20,
+            "NoInventory": False,
+            "CriticalInventory": 0,
+            "NotAvaliable": False,
+            "WritersIdToString": ["0|WholeCompany"],
+            "ReadersIdToString": [],
+            "OwnerId": 0,
+        }
+        result = await teamgram.create_product(payload)
+        if not result.get("Result") or not result.get("Id"):
+            raise HTTPException(502, f"TG'de oluşturulamadı: {result}")
+        p.tg_id = result["Id"]
 
-    p.tg_id = result["Id"]
     p.pending_approval = False
     db.commit()
     # Sync ile diğer alanları (kategori adı, parent vs.) doldur
@@ -295,18 +367,27 @@ async def approve_product(
 
 
 @router.post("/{product_id}/reject")
-def reject_product(
+async def reject_product(
     product_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_role("admin")),
 ):
-    """Admin: pending ürünü reddeder (sil). Oluşturana bildirim gider."""
+    """Admin: pending ürünü reddeder. TG'de varsa silinir, lokal kayıt silinir, oluşturana bildirim."""
     p = db.query(Product).filter(Product.id == product_id, Product.pending_approval == True).first()
     if not p:
         raise HTTPException(404, "Pending ürün bulunamadı")
 
     creator_id = p.created_by_id
     label = f"{p.brand} - {p.prod_model}"
+    tg_id = p.tg_id
+
+    # TG'de varsa sil (best-effort)
+    if tg_id:
+        try:
+            await teamgram.delete_product(tg_id)
+        except Exception:
+            pass
+
     db.delete(p)
     db.commit()
 

@@ -108,6 +108,7 @@ export default function ProductsPage() {
   const [brands, setBrands] = useState([])
 
   // Pending (sales/warehouse basit form + admin onay)
+  const [pendingList, setPendingList] = useState([])  // /products/pending — sayfalamadan bağımsız
   const [pendingDrawerOpen, setPendingDrawerOpen] = useState(false)
   const [pendingForm] = Form.useForm()
   const [pendingSubmitting, setPendingSubmitting] = useState(false)
@@ -169,6 +170,16 @@ export default function ProductsPage() {
 
   useEffect(() => { fetchCategories() }, [])
   useEffect(() => { fetchData() }, [fetchData])
+
+  const fetchPending = useCallback(async () => {
+    try {
+      const r = await api.get('/products/pending')
+      setPendingList(r.data || [])
+    } catch {
+      setPendingList([])
+    }
+  }, [])
+  useEffect(() => { fetchPending() }, [fetchPending])
 
   const handleSearch = (val) => {
     clearTimeout(searchTimer.current)
@@ -477,8 +488,8 @@ export default function ProductsPage() {
     ? categories.children.filter(c => c.parent_id === parentCatFilter)
     : categories.children
 
-  // ── Pending action card ──
-  const pendingItems = (data.items || []).filter((r) => r.pending_approval)
+  // ── Pending action card ── (sayfa filtresinden bağımsız ayrı liste)
+  const pendingItems = pendingList
 
   const openApproveDrawer = (record) => {
     setApproveRecord(record)
@@ -507,6 +518,7 @@ export default function ProductsPage() {
       message.success('Ürün onay için yöneticiye gönderildi')
       setPendingDrawerOpen(false)
       fetchData()
+      fetchPending()
     } catch (e) {
       if (e?.errorFields) return
       message.error(e?.response?.data?.detail || 'Hata')
@@ -523,6 +535,7 @@ export default function ProductsPage() {
       message.success('Ürün onaylandı ve TG\'ye yazıldı')
       setApproveDrawerOpen(false)
       fetchData()
+      fetchPending()
     } catch (e) {
       if (e?.errorFields) return
       message.error(e?.response?.data?.detail || 'Onaylama başarısız')
@@ -538,6 +551,7 @@ export default function ProductsPage() {
       message.warning('Ürün talebi reddedildi')
       setApproveDrawerOpen(false)
       fetchData()
+      fetchPending()
     } catch (e) {
       message.error('Reddedilemedi')
     }
