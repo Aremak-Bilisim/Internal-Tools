@@ -207,6 +207,9 @@ async def create_hepsiburada_shipment(
     # 3. TG sipariş (RelatedEntityIds ile fırsata bağla)
     from datetime import datetime as _dt
     today_iso = _dt.utcnow().strftime("%Y-%m-%dT00:00:00")
+    delivery_addr = " ".join(filter(None, [
+        data.delivery_address, data.delivery_district, data.delivery_city, data.delivery_zip,
+    ])).strip() or contact.get("address") or company_name
     order_payload = {
         "OrderDate": today_iso,
         "ScheduledFulfilment": today_iso,
@@ -216,6 +219,8 @@ async def create_hepsiburada_shipment(
         "Status": "ClosedFulfilled",
         "Stage": 0,
         "CurrencyName": _currency_name(inv.get("currency")),
+        "DeliveryAddress": delivery_addr,
+        "BillingAddress": delivery_addr,
         "Items": tg_items,
         "Tags": [HEPSIBURADA_TAG],
     }
