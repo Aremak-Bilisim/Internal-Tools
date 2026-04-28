@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Table, Card, Tag, Typography, Button, Segmented, Tooltip, message, Space,
-  Drawer, Form, Input, InputNumber, Select, DatePicker, Row, Col, Spin, Upload,
+  Drawer, Form, Input, InputNumber, Select, DatePicker, Row, Col, Spin, Upload, Radio,
 } from 'antd'
 import { FilePdfOutlined, ReloadOutlined, SendOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -111,6 +111,9 @@ export default function OrdersPage() {
   const teslimSekli = Form.useWatch('delivery_type', form)
   const gonderiTuru = Form.useWatch('shipping_doc_type', form)
   const odemeDurumu = Form.useWatch('odeme_durumu', form)
+  const irsaliyeMode = Form.useWatch('_irsaliye_mode', form)  // 'new' | 'existing'
+  const [existingIrsaliyes, setExistingIrsaliyes] = useState([])
+  const [loadingIrsaliyes, setLoadingIrsaliyes] = useState(false)
 
   useEffect(() => {
     if (teslimSekli === 'Kargo' && !form.getFieldValue('cargo_company')) {
@@ -345,6 +348,7 @@ export default function OrdersPage() {
     setDrawerOpen(true)
     setDrawerLoading(true)
     setDrawerItems([])
+    setExistingIrsaliyes([])
     form.resetFields()
     form.setFieldsValue({
       customer_name: customerName,
@@ -352,7 +356,18 @@ export default function OrdersPage() {
       delivery_type: 'Kargo',
       cargo_company: 'Yurtiçi Kargo',
       planned_ship_date: dayjs(),
+      _irsaliye_mode: 'new',
     })
+
+    // VKN ile mevcut Paraşüt irsaliyelerini arka planda çek
+    const taxNo = (order.RelatedEntity?.TaxNo || '').trim()
+    if (taxNo) {
+      setLoadingIrsaliyes(true)
+      api.get(`/parasut/irsaliyes/by-vkn?vkn=${encodeURIComponent(taxNo)}`)
+        .then(r => setExistingIrsaliyes(r.data?.irsaliyes || []))
+        .catch(() => setExistingIrsaliyes([]))
+        .finally(() => setLoadingIrsaliyes(false))
+    }
     try {
       const res = await api.get(`/orders/${order.Id}`)
       const o = res.data
@@ -417,10 +432,11 @@ export default function OrdersPage() {
           return
         }
       }
-      // İrsaliye seçiliyse fatura zorunlu
+      // İrsaliye seçiliyse fatura zorunlu (mevcut irsaliye seçimi hariç)
       const docType = values.shipping_doc_type || ''
       const inv = findInvoice(drawerOrder)
-      if (docType.includes('İrsaliye') && !inv) {
+      const usingExistingIrsaliye = values._irsaliye_mode === 'existing'
+      if (docType.includes('İrsaliye') && !inv && !usingExistingIrsaliye) {
         message.error('Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. Devam etmek için önce Paraşüt\'te fatura oluşturun ve faturaları yenileyin.')
         return
       }
@@ -452,7 +468,8 @@ export default function OrdersPage() {
         recipient_phone: values.recipient_phone || null,
         planned_ship_date: values.planned_ship_date ? values.planned_ship_date.format('YYYY-MM-DD') : null,
         shipping_doc_type: values.shipping_doc_type || null,
-        waybill_note: values.waybill_note || null,
+        waybill_note: values._irsaliye_mode === 'existing' ? null : (values.waybill_note || null),
+        existing_irsaliye_id: values._irsaliye_mode === 'existing' ? (values.existing_irsaliye_id || null) : null,
         assigned_to_id: values.assigned_to_id || null,
         items: drawerItems,
       })
@@ -889,9 +906,38 @@ export default function OrdersPage() {
             )}
 
             {(gonderiTuru === 'İrsaliye' || gonderiTuru === 'Fatura + İrsaliye') && (
-              <Form.Item name="waybill_note" label="İrsaliye Notu">
-                <TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
-              </Form.Item>
+              <>
+                <Form.Item name="_irsaliye_mode" label="İrsaliye Kaynağı">
+                  <Radio.Group>
+                    <Radio value="new">Yeni irsaliye oluştur</Radio>
+                    <Radio value="existing" disabled={!existingIrsaliyes.length && !loadingIrsaliyes}>
+                      Mevcut irsaliyeyi seç {loadingIrsaliyes ? '(yükleniyor...)' : existingIrsaliyes.length ? `(${existingIrsaliyes.length})` : '(yok)'}
+                    </Radio>
+                  </Radio.Group>
+                </Form.Item>
+                {irsaliyeMode === 'existing' ? (
+                  <Form.Item
+                    name="existing_irsaliye_id"
+                    label="Mevcut İrsaliye"
+                    rules={[{ required: true, message: 'Bir irsaliye seçin' }]}
+                  >
+                    <Select
+                      placeholder="İrsaliye seç..."
+                      loading={loadingIrsaliyes}
+                      options={existingIrsaliyes.map(i => ({
+                        value: i.id,
+                        label: `${i.issue_date || '-'} • ${i.gross_total ? `${i.gross_total} TL` : ''} ${i.description ? `• ${i.description}` : ''}`.trim(),
+                      }))}
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                ) : (
+                  <Form.Item name="waybill_note" label="İrsaliye Notu">
+                    <TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
+                  </Form.Item>
+                )}
+              </>
             )}
 
             <Form.Item

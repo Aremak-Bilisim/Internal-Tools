@@ -34,6 +34,18 @@ async def refresh_invoices(current_user=Depends(get_current_user)):
     return {"invoices": invoices, "count": len(invoices)}
 
 
+@router.get("/irsaliyes/by-vkn")
+async def list_irsaliyes_by_vkn(vkn: str, current_user=Depends(get_current_user)):
+    """VKN ile Paraşüt'te cari bul, ona ait irsaliyeleri tarihe göre azalan döndür."""
+    if not vkn or not vkn.strip():
+        return {"contact_id": None, "irsaliyes": []}
+    contact_id = await parasut.search_contact_by_tax_number(vkn.strip())
+    if not contact_id:
+        return {"contact_id": None, "irsaliyes": []}
+    irsaliyes = await parasut.list_irsaliyes_by_contact_id(contact_id)
+    return {"contact_id": contact_id, "irsaliyes": irsaliyes}
+
+
 @router.get("/irsaliye/{irsaliye_id}")
 async def get_irsaliye(irsaliye_id: str, current_user=Depends(get_current_user)):
     info = await parasut.get_irsaliye_info(irsaliye_id)

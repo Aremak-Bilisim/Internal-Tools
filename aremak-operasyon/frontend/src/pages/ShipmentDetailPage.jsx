@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, InputNumber, Upload, Image, Drawer, Form, Select, Row, Col, DatePicker } from 'antd'
+import { Card, Descriptions, Tag, Button, Timeline, Typography, Space, Spin, message, Table, Popconfirm, Modal, Input, InputNumber, Upload, Image, Drawer, Form, Select, Row, Col, DatePicker, Radio } from 'antd'
 import { ArrowLeftOutlined, CheckOutlined, RollbackOutlined, ExportOutlined, DeleteOutlined, FilePdfOutlined, ShoppingOutlined, UploadOutlined, PaperClipOutlined, EditOutlined, SendOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -82,6 +82,9 @@ export default function ShipmentDetailPage() {
   const editDeliveryType = Form.useWatch('delivery_type', editForm)
   const editDocType = Form.useWatch('shipping_doc_type', editForm)
   const editOdemeDurumu = Form.useWatch('odeme_durumu', editForm)
+  const editIrsaliyeMode = Form.useWatch('_irsaliye_mode', editForm)
+  const [editIrsaliyes, setEditIrsaliyes] = useState([])
+  const [editIrsaliyesLoading, setEditIrsaliyesLoading] = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -144,8 +147,21 @@ export default function ShipmentDetailPage() {
       waybill_note: shipment.waybill_note,
       odeme_durumu: undefined,
       beklenen_odeme_tarihi: undefined,
+      _irsaliye_mode: shipment.irsaliye_id ? 'existing' : 'new',
+      existing_irsaliye_id: shipment.irsaliye_id || undefined,
     })
     setEditDrawerOpen(true)
+    setEditIrsaliyes([])
+
+    // VKN ile mevcut Paraşüt irsaliyelerini arka planda çek
+    const taxNo = (order?.RelatedEntity?.TaxNo || '').trim()
+    if (taxNo) {
+      setEditIrsaliyesLoading(true)
+      api.get(`/parasut/irsaliyes/by-vkn?vkn=${encodeURIComponent(taxNo)}`)
+        .then(r => setEditIrsaliyes(r.data?.irsaliyes || []))
+        .catch(() => setEditIrsaliyes([]))
+        .finally(() => setEditIrsaliyesLoading(false))
+    }
 
     // TG siparişinden ödeme bilgilerini çek
     if (shipment.tg_order_id) {
@@ -211,7 +227,8 @@ export default function ShipmentDetailPage() {
         shipping_doc_type: values.shipping_doc_type || null,
         notes: values.notes || null,
         invoice_note: values.invoice_note || null,
-        waybill_note: values.waybill_note || null,
+        waybill_note: values._irsaliye_mode === 'existing' ? null : (values.waybill_note || null),
+        existing_irsaliye_id: values._irsaliye_mode === 'existing' ? (values.existing_irsaliye_id || null) : (values._irsaliye_mode === 'new' ? '' : null),
         items: shipment.items || [],
       })
       // 2) Ödeme durumu zorunlu kontrolü
@@ -1048,9 +1065,34 @@ export default function ShipmentDetailPage() {
           )}
 
           {(editDocType === 'İrsaliye' || editDocType === 'Fatura + İrsaliye') && (
-            <Form.Item name="waybill_note" label="İrsaliye Notu">
-              <Input.TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
-            </Form.Item>
+            <>
+              <Form.Item name="_irsaliye_mode" label="İrsaliye Kaynağı">
+                <Radio.Group>
+                  <Radio value="new">Yeni irsaliye oluştur</Radio>
+                  <Radio value="existing" disabled={!editIrsaliyes.length && !editIrsaliyesLoading}>
+                    Mevcut irsaliyeyi seç {editIrsaliyesLoading ? '(yükleniyor...)' : editIrsaliyes.length ? `(${editIrsaliyes.length})` : '(yok)'}
+                  </Radio>
+                </Radio.Group>
+              </Form.Item>
+              {editIrsaliyeMode === 'existing' ? (
+                <Form.Item name="existing_irsaliye_id" label="Mevcut İrsaliye" rules={[{ required: true, message: 'Bir irsaliye seçin' }]}>
+                  <Select
+                    placeholder="İrsaliye seç..."
+                    loading={editIrsaliyesLoading}
+                    options={editIrsaliyes.map(i => ({
+                      value: i.id,
+                      label: `${i.issue_date || '-'} • ${i.gross_total ? `${i.gross_total} TL` : ''} ${i.description ? `• ${i.description}` : ''}`.trim(),
+                    }))}
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </Form.Item>
+              ) : (
+                <Form.Item name="waybill_note" label="İrsaliye Notu">
+                  <Input.TextArea rows={2} placeholder="İrsaliyeye eklenecek not..." />
+                </Form.Item>
+              )}
+            </>
           )}
 
           {/* Ödeme Bilgileri — sevk talebi oluşturma formuyla aynı sırada */}

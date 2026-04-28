@@ -62,6 +62,7 @@ class ShipmentCreate(BaseModel):
     shipping_doc_type: Optional[str] = None
     items: list = []
     assigned_to_id: Optional[int] = None
+    existing_irsaliye_id: Optional[str] = None    # mevcut Paraşüt irsaliyesi seçildiyse
 
 
 class StageAdvance(BaseModel):
@@ -288,6 +289,7 @@ def create_shipment(
         assigned_to_id=data.assigned_to_id,
         created_by_id=current_user.id,
         stage="pending_admin",
+        irsaliye_id=data.existing_irsaliye_id or None,
     )
     db.add(s)
     db.commit()
@@ -347,7 +349,10 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
     # 3. Paraşüt irsaliye — only when shipping_doc_type includes İrsaliye
     doc_type = shipment.get("shipping_doc_type") or ""
     invoice_url = shipment.get("invoice_url") or ""
-    if "İrsaliye" in doc_type:
+    # Mevcut irsaliye seçildiyse yeni oluşturmayı atla
+    if "İrsaliye" in doc_type and shipment.get("irsaliye_id"):
+        logger.info(f"Mevcut irsaliye seçilmiş ({shipment.get('irsaliye_id')}), yeni oluşturulmayacak.")
+    elif "İrsaliye" in doc_type:
         if not invoice_url:
             msg = "Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. İrsaliye oluşturulamadı."
             logger.warning(msg)
@@ -661,6 +666,9 @@ def update_shipment(
     s.notes = data.notes
     s.invoice_note = data.invoice_note
     s.waybill_note = data.waybill_note
+    # existing_irsaliye_id geldiyse irsaliye_id'yi güncelle (mevcut Paraşüt irsaliyesi eşleştirme)
+    if data.existing_irsaliye_id is not None:
+        s.irsaliye_id = data.existing_irsaliye_id or None
     if data.items is not None:
         s.items = data.items
 
