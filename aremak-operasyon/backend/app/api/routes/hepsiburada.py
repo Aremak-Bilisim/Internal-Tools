@@ -152,12 +152,16 @@ async def create_hepsiburada_shipment(
         if not prod or not prod.tg_id:
             unmatched.append(code or it.get("product_name") or "?")
             continue
+        # KDV dahil birim fiyat (Paraşüt'te unit_price KDV hariç)
+        unit_excl = float(it.get("unit_price") or 0)
+        vat_rate = float(it.get("vat_rate") or 20)
+        unit_incl = round(unit_excl * (1 + vat_rate / 100.0), 2)
         tg_items.append({
             "Product": {"Id": prod.tg_id},
             "Quantity": it.get("quantity") or 0,
-            "Price": it.get("unit_price") or 0,
+            "Price": unit_incl,
             "CurrencyName": _currency_name(it.get("currency") or inv.get("currency")),
-            "Vat": float(it.get("vat_rate") or 20),
+            "Vat": vat_rate,
             "Unit": "adet",
             "Description": it.get("product_name") or "",
             "DiscountType": 0,
@@ -196,14 +200,16 @@ async def create_hepsiburada_shipment(
 
     # 2. TG fırsat
     opp_name = inv.get("description") or f"Hepsiburada - {inv.get('invoice_no')}"
+    # Parasut: gross_total = KDV haric subtotal, net_total = KDV dahil grand total
+    inv_gross_incl = inv.get("net_total") or inv.get("gross_total") or 0
     opp_payload = {
         "Name": opp_name,
         "RelatedEntityId": tg_company_id,
         "Status": "ClosedWon",
         "CustomStageId": KAZANILDI_CUSTOM_STAGE_ID,
-        "Amount": str(inv.get("gross_total") or 0),
+        "Amount": str(inv_gross_incl),
         "CurrencyName": _currency_name(inv.get("currency")),
-        "RealizedAmount": str(inv.get("gross_total") or 0),
+        "RealizedAmount": str(inv_gross_incl),
         "RealizedCurrencyName": _currency_name(inv.get("currency")),
         "Tags": [HEPSIBURADA_TAG],
     }
@@ -229,6 +235,7 @@ async def create_hepsiburada_shipment(
         "CurrencyName": _currency_name(inv.get("currency")),
         "DeliveryAddress": delivery_addr,
         "BillingAddress": delivery_addr,
+        "VatType": 2,   # VatInclusive — Items.Price KDV dahil
         "Items": tg_items,
         "Tags": [HEPSIBURADA_TAG],
     }
