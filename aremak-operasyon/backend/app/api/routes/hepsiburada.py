@@ -206,8 +206,10 @@ async def create_hepsiburada_shipment(
 
     # 3. TG sipariş (RelatedEntityIds ile fırsata bağla)
     from datetime import datetime as _dt
+    today_iso = _dt.utcnow().strftime("%Y-%m-%dT00:00:00")
     order_payload = {
-        "OrderDate": _dt.utcnow().strftime("%Y-%m-%dT00:00:00"),
+        "OrderDate": today_iso,
+        "ScheduledFulfilment": today_iso,
         "Name": opp_name,
         "RelatedEntityId": tg_company_id,
         "RelatedEntityIds": str(tg_opp_id),
