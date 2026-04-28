@@ -46,10 +46,13 @@ async def list_pending_hepsiburada_invoices(
     """Paraşüt'te 'Hepsiburada' description prefix'li, henüz lokal sevk
     talebine bağlanmamış faturaları döndürür."""
     invoices = await parasut.get_invoices()  # cache TTL 30 dk
-    # Description ilk kelimesi 'Hepsiburada' (case-insensitive)
+    # Description ilk kelimesi 'Hepsiburada' (case-insensitive) +
+    # 28.04.2026 ve sonrası faturalar
+    HB_START_DATE = "2026-04-28"
     cands = [
         inv for inv in invoices
         if (inv.get("description") or "").strip().lower().startswith("hepsiburada")
+        and (inv.get("issue_date") or "") >= HB_START_DATE
     ]
     # Lokal'de zaten bağlanmış olanları çıkar
     used_urls = {
