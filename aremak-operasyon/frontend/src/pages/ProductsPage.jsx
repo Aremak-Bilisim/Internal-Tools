@@ -117,6 +117,7 @@ export default function ProductsPage() {
   const [approveRecord, setApproveRecord] = useState(null)
   const [approveSubmitting, setApproveSubmitting] = useState(false)
   const [approveParentCat, setApproveParentCat] = useState(null)
+  const [pendingParentCat, setPendingParentCat] = useState(null)
 
   // Create drawer
   const [createOpen, setCreateOpen] = useState(false)
@@ -1099,11 +1100,11 @@ export default function ProductsPage() {
       <Drawer
         title="Yeni Ürün Talebi"
         open={pendingDrawerOpen}
-        onClose={() => setPendingDrawerOpen(false)}
+        onClose={() => { setPendingDrawerOpen(false); setPendingParentCat(null); pendingForm.resetFields() }}
         width={520}
         footer={
           <Space style={{ float: 'right' }}>
-            <Button onClick={() => setPendingDrawerOpen(false)}>İptal</Button>
+            <Button onClick={() => { setPendingDrawerOpen(false); setPendingParentCat(null); pendingForm.resetFields() }}>İptal</Button>
             <Button type="primary" loading={pendingSubmitting} onClick={submitPending}>
               Onaya Gönder
             </Button>
@@ -1120,6 +1121,28 @@ export default function ProductsPage() {
           <Form.Item name="prod_model" label="Model" rules={[{ required: true }]}>
             <Input placeholder="MV-CU020-90GM" />
           </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="parent_category_id" label="Ana Kategori" rules={[{ required: true }]}>
+                <Select
+                  placeholder="Seç..."
+                  onChange={(v) => { setPendingParentCat(v); pendingForm.setFieldValue('category_id', undefined) }}
+                  options={categories.parents.map(p => ({ value: p.id, label: p.name }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="category_id" label="Alt Kategori" rules={[{ required: true }]}>
+                <Select
+                  placeholder="Önce ana kategori seç"
+                  disabled={!pendingParentCat}
+                  options={categories.children
+                    .filter(c => c.parent_id === pendingParentCat)
+                    .map(c => ({ value: c.id, label: c.name }))}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
           <Row gutter={12}>
             <Col span={16}>
               <Form.Item name="price" label="Satış Fiyatı">

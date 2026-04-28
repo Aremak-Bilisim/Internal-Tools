@@ -156,6 +156,8 @@ PENDING_TAG = "Onay-Bekliyor"
 class ProductPendingCreate(BaseModel):
     brand: str
     prod_model: str
+    parent_category_id: Optional[int] = None   # ana kategori (level 0)
+    category_id: Optional[int] = None          # alt kategori (level 1)
     price: Optional[float] = None
     currency_name: Optional[str] = "TL"
     purchase_price: Optional[float] = None
@@ -196,7 +198,7 @@ async def create_pending_product(
         "PurchasePrice": body.purchase_price or 0.0,
         "PurchaseCurrencyId": CURRENCY_NAME_TO_ID.get((body.purchase_currency_name or "TL").upper(), 1),
         "Details": body.details or "",
-        "CategoryId": 0,
+        "CategoryId": body.category_id or 0,
         "Unit": body.unit or "adet",
         "Vat": body.vat or 20,
         "NoInventory": False,
@@ -229,6 +231,8 @@ async def create_pending_product(
         vat=body.vat,
         unit=(body.unit or "adet"),
         details=body.details,
+        category_id=body.category_id,
+        parent_category_id=body.parent_category_id,
         pending_approval=True,
         created_by_id=current_user.id,
         no_inventory=False,
@@ -299,10 +303,18 @@ async def approve_product(
     if p.tg_id:
         # TG'de mevcut: Edit ile fields güncelle ve tag'i kaldır
         try:
-            current = await teamgram.get_product(p.tg_id)
-            current_tags = current.get("Tags") or []
-            new_tags = [t for t in current_tags if t and t != PENDING_TAG]
-            edit_payload = current
+            edit_payload = await teamgram.get_product_edit_payload(p.tg_id)
+            current_tags = edit_payload.get("Tags") or []
+            # Tags farklı şekillerde gelebilir: ["str", ...] veya [{"Name": "..."}, ...]
+            new_tags = []
+            for t in current_tags:
+                if isinstance(t, dict):
+                    name = t.get("Name") or t.get("Tag") or ""
+                    if name and name != PENDING_TAG:
+                        new_tags.append(t)
+                elif isinstance(t, str):
+                    if t and t != PENDING_TAG:
+                        new_tags.append(t)
             edit_payload["Brand"] = p.brand
             edit_payload["ProdModel"] = p.prod_model
             edit_payload["Sku"] = p.sku
@@ -314,7 +326,8 @@ async def approve_product(
             edit_payload["CategoryId"] = p.category_id or 0
             edit_payload["Unit"] = p.unit or "adet"
             edit_payload["Vat"] = p.vat or 20
-            edit_payload["Tags"] = new_tags
+            # TG quirk: Tags=[] no-op olarak yok sayılır; tüm etiketleri kaldırmak için Tags=None gönder
+            edit_payload["Tags"] = new_tags if new_tags else None
             await teamgram.edit_product(edit_payload)
         except Exception as e:
             raise HTTPException(502, f"TG güncellenemedi: {e}")
