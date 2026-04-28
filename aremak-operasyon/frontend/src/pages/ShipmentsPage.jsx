@@ -4,6 +4,7 @@ import { EyeOutlined, ThunderboltOutlined, ClearOutlined } from '@ant-design/ico
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import HepsiburadaShipmentModal from '../components/HepsiburadaShipmentModal'
 
 const { RangePicker } = DatePicker
 
@@ -75,6 +76,7 @@ export default function ShipmentsPage() {
   const [usersByRole, setUsersByRole] = useState({})
   const [dateRange, setDateRange] = useState(null)
   const [archiveStatusFilter, setArchiveStatusFilter] = useState([])
+  const [hbModalOpen, setHbModalOpen] = useState(false)
 
   const loadAll = () => {
     api.get('/shipments').then((r) => {
@@ -203,8 +205,13 @@ export default function ShipmentsPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Title level={4} style={{ margin: 0 }}>Satış Sevkleri</Title>
+        {['admin', 'sales', 'warehouse'].includes(user?.role) && (
+          <Button type="primary" onClick={() => setHbModalOpen(true)}>
+            Hepsiburada Sevki Oluştur
+          </Button>
+        )}
       </div>
 
       {/* Aksiyon Kartları */}
@@ -313,6 +320,12 @@ export default function ShipmentsPage() {
           rowClassName={(r) => isMyTurn(r) ? 'row-my-turn' : ''}
         />
       </Card>
+
+      <HepsiburadaShipmentModal
+        open={hbModalOpen}
+        onClose={() => setHbModalOpen(false)}
+        onCreated={(id) => navigate(`/shipments/${id}`)}
+      />
     </div>
   )
 }

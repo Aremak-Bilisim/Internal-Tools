@@ -139,6 +139,51 @@ async def create_order(payload: dict, split_order_id: Optional[int] = None) -> d
         return r.json()
 
 
+async def create_company(payload: dict) -> dict:
+    """TG'de yeni şirket oluşturur. UTF-8 byte gönderir."""
+    import json as _json
+    url = f"{BASE}/{DOMAIN}/Companies/Create"
+    body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(url, headers=headers, content=body)
+        r.raise_for_status()
+        return r.json()
+
+
+async def search_company_by_tax_no(tax_no: str) -> Optional[dict]:
+    """TG companies içinde TaxNo eşleşmesi ile şirket arar (lokal mirror tablosundan).
+    Returns company dict {Id, Displayname, TaxNo} or None."""
+    if not tax_no:
+        return None
+    raw = tax_no.strip()
+    candidates = [raw]
+    stripped = raw.lstrip("0")
+    if stripped and stripped != raw:
+        candidates.append(stripped)
+    # Search via local mirror (TG /Companies/Index VKN filter desteklemiyor)
+    from app.core.database import SessionLocal
+    from app.models.teamgram_company import TeamgramCompany
+    with SessionLocal() as db:
+        for vkn in candidates:
+            row = db.query(TeamgramCompany).filter(TeamgramCompany.tax_no == vkn).first()
+            if row:
+                return {"Id": row.tg_id, "Displayname": row.name, "TaxNo": row.tax_no}
+    return None
+
+
+async def create_opportunity(payload: dict) -> dict:
+    """TG'de yeni fırsat oluşturur."""
+    import json as _json
+    url = f"{BASE}/{DOMAIN}/Opportunities/Create"
+    body = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {**HEADERS, "Content-Type": "application/json; charset=utf-8"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(url, headers=headers, content=body)
+        r.raise_for_status()
+        return r.json()
+
+
 async def delete_order(order_id: int) -> dict:
     """Müşteri siparişini siler (split child temizliği için)."""
     url = f"{BASE}/aremak/Orders/Delete?id={order_id}"
