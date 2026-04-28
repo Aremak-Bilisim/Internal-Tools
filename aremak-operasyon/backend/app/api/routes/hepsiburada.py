@@ -201,15 +201,16 @@ async def create_hepsiburada_shipment(
     # 2. TG fırsat
     opp_name = inv.get("description") or f"Hepsiburada - {inv.get('invoice_no')}"
     # Parasut: gross_total = KDV haric subtotal, net_total = KDV dahil grand total
-    inv_gross_incl = inv.get("net_total") or inv.get("gross_total") or 0
+    # Opp Amount KDV haric (siparis kart tutariyla esit olsun)
+    inv_excl = inv.get("gross_total") or 0
     opp_payload = {
         "Name": opp_name,
         "RelatedEntityId": tg_company_id,
         "Status": "ClosedWon",
         "CustomStageId": KAZANILDI_CUSTOM_STAGE_ID,
-        "Amount": str(inv_gross_incl),
+        "Amount": str(inv_excl),
         "CurrencyName": _currency_name(inv.get("currency")),
-        "RealizedAmount": str(inv_gross_incl),
+        "RealizedAmount": str(inv_excl),
         "RealizedCurrencyName": _currency_name(inv.get("currency")),
         "Tags": [HEPSIBURADA_TAG],
     }
@@ -245,16 +246,23 @@ async def create_hepsiburada_shipment(
     tg_order_id = ord_res["Id"]
 
     # 3a. Order'i opp'a bagla (Create sirasinda RelatedEntityIds bazen tutmuyor — Edit ile pekistiriyoruz)
+    # KRITIK: VatType=2 (VatInclusive) ise TG Get response'unda Price KDV-haric base donuyor.
+    # Bunu Edit'e oldugu gibi geri postlarsak TG bir kez daha /1.2 uygulayarak fiyatlari yariya
+    # indiriyor. O yuzden VatInclusive ise Price * (1+vat/100) ile tekrar dahile cevirip postluyoruz.
     try:
         ord_full = await teamgram.get_order_full(tg_order_id)
+        cur_vat_type = ord_full.get("VatType") or 0
         edit_items = []
         for it in (ord_full.get("Items") or []):
+            base_price = float(it.get("Price") or 0)
+            vat_r = float(it.get("Vat") or 0)
+            send_price = round(base_price * (1 + vat_r / 100.0), 2) if cur_vat_type == 2 else base_price
             edit_items.append({
                 "Product": {"Id": (it.get("Product") or {}).get("Id")},
                 "Quantity": it.get("Quantity") or 0,
-                "Price": it.get("Price") or 0,
+                "Price": send_price,
                 "CurrencyName": it.get("CurrencyName") or "TL",
-                "Vat": it.get("Vat") or 20,
+                "Vat": vat_r or 20,
                 "Unit": it.get("Unit") or "adet",
                 "Description": it.get("Description") or "",
                 "DiscountType": 0, "Discount": 0,
@@ -277,7 +285,7 @@ async def create_hepsiburada_shipment(
             "OwnerId": (ord_full.get("Owner") or {}).get("Id") or 0,
             "Items": edit_items,
             "CustomFieldDatas": [],
-            "VatType": ord_full.get("VatType") or 0,
+            "VatType": cur_vat_type,
         }
         await teamgram.edit_order(edit_payload)
     except Exception as e:
