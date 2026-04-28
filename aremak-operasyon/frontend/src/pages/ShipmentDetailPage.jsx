@@ -373,7 +373,8 @@ export default function ShipmentDetailPage() {
     revizyon_bekleniyor:      ['sales', 'admin'],
   }
   const isPreparingStage = shipment.stage === 'preparing' && user?.role === 'warehouse'
-  const canShip = isPreparingStage && !!shipment.cargo_pdf_url
+  // Ofis Teslim'de kargo fişi zorunlu değil
+  const canShip = isPreparingStage && (shipment.delivery_type === 'Ofis Teslim' || !!shipment.cargo_pdf_url)
   const canAdvance = ADVANCE_LABELS[shipment.stage] && STAGE_ALLOWED_ROLES[shipment.stage]?.includes(user?.role)
     && (shipment.stage !== 'preparing' || canShip)
   const canRequestRevision = user?.role === 'admin' && shipment.stage === 'pending_admin'
@@ -451,10 +452,10 @@ export default function ShipmentDetailPage() {
                 <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 8, padding: 16 }}>
                   <Text strong style={{ display: 'block', marginBottom: 12 }}>Sevk Öncesi Belgeler</Text>
 
-                  {/* Kargo Fişi PDF */}
+                  {/* Kargo Fişi PDF — Ofis Teslim'de opsiyonel */}
                   <div style={{ marginBottom: 12 }}>
                     <Text style={{ display: 'block', marginBottom: 6 }}>
-                      Kargo Fişi (PDF) <Text type="danger">*</Text>
+                      Kargo Fişi (PDF) {shipment.delivery_type !== 'Ofis Teslim' && <Text type="danger">*</Text>}
                     </Text>
                     {shipment.cargo_pdf_url ? (
                       <Space>

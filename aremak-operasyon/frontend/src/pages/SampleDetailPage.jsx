@@ -74,7 +74,8 @@ export default function SampleDetailPage() {
 
   useEffect(() => { load() }, [id])
 
-  const canShip = sample?.stage === 'preparing' && !!sample?.cargo_pdf_url
+  // Ofis Teslim'de kargo fişi zorunlu değil
+  const canShip = sample?.stage === 'preparing' && (sample?.delivery_type === 'Ofis Teslim' || !!sample?.cargo_pdf_url)
   const canAdvance = sample && user && STAGE_ROLES[sample.stage]?.includes(user.role)
     && (sample.stage !== 'preparing' || canShip)
   const canRequestRevision = user?.role === 'admin' && sample?.stage === 'pending_admin'
@@ -300,7 +301,7 @@ export default function SampleDetailPage() {
                   </div>
                 </div>
 
-                {!sample.cargo_pdf_url && (
+                {!sample.cargo_pdf_url && sample.delivery_type !== 'Ofis Teslim' && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     ⚠ Sevk edildi olarak işaretlemek için kargo fişini yükleyin.
                   </Text>
