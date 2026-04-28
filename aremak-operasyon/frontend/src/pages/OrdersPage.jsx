@@ -183,6 +183,8 @@ export default function OrdersPage() {
   }, [])
 
   const [shipmentOrderNames, setShipmentOrderNames] = useState(new Set())
+  // tg_order_id -> {url, invoice_no} (kesin baglanti — scoring algoritmasini override eder)
+  const [explicitInvoiceMap, setExplicitInvoiceMap] = useState({})
 
   useEffect(() => {
     api.get('/shipments').then((r) => {
@@ -190,6 +192,13 @@ export default function OrdersPage() {
       const names = new Set(r.data.map((s) => s.tg_order_name).filter(Boolean))
       setShipmentOrderIds(ids)
       setShipmentOrderNames(names)
+      const explicit = {}
+      for (const s of r.data) {
+        if (s.tg_order_id && s.invoice_url) {
+          explicit[s.tg_order_id] = { url: s.invoice_url, invoice_no: s.invoice_no }
+        }
+      }
+      setExplicitInvoiceMap(explicit)
     }).catch(() => {})
   }, [])
 
@@ -315,7 +324,20 @@ export default function OrdersPage() {
     })()
   }, [data.List, invoiceMap, invoiceTaxMap, invoiceDescMap])
 
-  const findInvoice = (r) => orderInvoiceMap[r.Id] || null
+  const findInvoice = (r) => {
+    // Once kesin baglanti (Shipment.invoice_url'den) — sonra scoring fallback
+    const explicit = explicitInvoiceMap[r.Id]
+    if (explicit?.url) {
+      // Paraşüt invoice cache'inde id'ye göre tam objeyi bul, yoksa minimal obje dön
+      const invId = explicit.url.split('/').pop()
+      const fullInv =
+        Object.values(invoiceTaxMap).flat().find(i => i.id === invId) ||
+        Object.values(invoiceMap).flat().find(i => i.id === invId) ||
+        Object.values(invoiceDescMap || {}).find(i => i.id === invId)
+      return fullInv || { id: invId, url: explicit.url, invoice_no: explicit.invoice_no }
+    }
+    return orderInvoiceMap[r.Id] || null
+  }
 
   // Parent (split) için: children'ın faturalarını topla. Tek sipariş için: tek fatura array'i.
   const findInvoicesForRow = (r) => {
