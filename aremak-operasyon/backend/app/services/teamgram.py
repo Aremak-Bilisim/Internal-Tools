@@ -172,6 +172,24 @@ async def search_company_by_tax_no(tax_no: str) -> Optional[dict]:
     return None
 
 
+async def search_company_by_name(name: str) -> Optional[dict]:
+    """TG companies lokal mirror'da exact (case-insensitive) isim eşleşmesi.
+    Returns {Id, Displayname, TaxNo} or None."""
+    if not name or not name.strip():
+        return None
+    needle = name.strip().lower()
+    from app.core.database import SessionLocal
+    from app.models.teamgram_company import TeamgramCompany
+    from sqlalchemy import func as _f
+    with SessionLocal() as db:
+        row = (db.query(TeamgramCompany)
+               .filter(_f.lower(TeamgramCompany.name) == needle)
+               .first())
+        if row:
+            return {"Id": row.tg_id, "Displayname": row.name, "TaxNo": row.tax_no}
+    return None
+
+
 async def create_opportunity(payload: dict) -> dict:
     """TG'de yeni fırsat oluşturur."""
     import json as _json
