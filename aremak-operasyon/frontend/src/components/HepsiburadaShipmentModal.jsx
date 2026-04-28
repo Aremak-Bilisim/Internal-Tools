@@ -195,9 +195,6 @@ export default function HepsiburadaShipmentModal({ open, onClose, onCreated }) {
           <Form.Item name="recipient_name" label="Alıcı Adı" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="recipient_phone" label="Alıcı Telefonu">
-            <Input placeholder="Hepsiburada paylaşmaz, opsiyonel" />
-          </Form.Item>
           <Form.Item name="delivery_address" label="Teslimat Adresi" rules={[{ required: true }]}>
             <Input.TextArea rows={2} />
           </Form.Item>
