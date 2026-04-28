@@ -166,16 +166,23 @@ async def create_hepsiburada_shipment(
     if unmatched:
         raise HTTPException(422, {"error": "SKU eşleşmedi", "unmatched": unmatched})
 
-    # 1. TG'de cari bul/oluştur
+    # 1. TG'de cari oluştur — Hepsiburada B2C carilerde tax_number her zaman
+    # dummy "11111111111" (TC kimlik girilmediği için), VKN match güvenilmez.
+    # Her sipariş için yeni TG company oluşturuyoruz (her sipariş farklı kişi).
     tax_no = (contact.get("tax_number") or "").strip()
     company_name = contact.get("name") or "Hepsiburada Müşterisi"
-    company_match = await teamgram.search_company_by_tax_no(tax_no) if tax_no else None
+    DUMMY_VKN = {"11111111111", "00000000000", "1111111111", "0000000000"}
+    is_dummy = tax_no in DUMMY_VKN or not tax_no
+    company_match = (
+        await teamgram.search_company_by_tax_no(tax_no)
+        if tax_no and not is_dummy else None
+    )
     if company_match:
         tg_company_id = company_match["Id"]
     else:
         comp_payload = {
             "Name": company_name,
-            "TaxNo": tax_no or None,
+            "TaxNo": (tax_no if not is_dummy else None),
             "TaxOffice": contact.get("tax_office") or None,
             "Tags": [HEPSIBURADA_TAG],
             "Channel": HEPSIBURADA_CHANNEL_ID,
