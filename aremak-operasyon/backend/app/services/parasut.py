@@ -651,7 +651,7 @@ async def list_invoices_by_contact_id(contact_id: str, page_size: int = 30) -> l
         data = await _api_get("sales_invoices", {
             "filter[contact_id]": contact_id,
             "sort": "-issue_date",
-            "page[size]": min(page_size, 50),
+            "page[size]": min(page_size, 25),
         })
     except Exception as e:
         logger.warning(f"Paraşüt fatura listesi alınamadı (contact={contact_id}): {e}")
@@ -681,7 +681,7 @@ async def list_irsaliyes_by_contact_id(contact_id: str, page_size: int = 30) -> 
         data = await _api_get("shipment_documents", {
             "filter[contact_id]": contact_id,
             "sort": "-issue_date",
-            "page[size]": min(page_size, 50),
+            "page[size]": min(page_size, 25),
         })
     except Exception as e:
         logger.warning(f"Paraşüt irsaliye listesi alınamadı (contact={contact_id}): {e}")
