@@ -869,7 +869,7 @@ export default function ShipmentDetailPage() {
               {!shipment.irsaliye_id && (
                 <Text type="secondary">Bu sevk talebi için irsaliye kaydı yok.</Text>
               )}
-              {shipment.irsaliye_id && (
+              {shipment.irsaliye_id && (<>
               <Descriptions column={2} size="small">
                 {irsaliye?.contact_name && (
                   <Descriptions.Item label="Müşteri" span={2}>{irsaliye.contact_name}</Descriptions.Item>
@@ -909,7 +909,7 @@ export default function ShipmentDetailPage() {
                   Paraşüt'te Görüntüle
                 </Button>
               </div>
-              )}
+              </>)}
             </Card>
           )}
 
