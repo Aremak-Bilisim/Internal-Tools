@@ -452,28 +452,30 @@ export default function ShipmentDetailPage() {
                 <div style={{ background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 8, padding: 16 }}>
                   <Text strong style={{ display: 'block', marginBottom: 12 }}>Sevk Öncesi Belgeler</Text>
 
-                  {/* Kargo Fişi PDF — Ofis Teslim'de opsiyonel */}
-                  <div style={{ marginBottom: 12 }}>
-                    <Text style={{ display: 'block', marginBottom: 6 }}>
-                      Kargo Fişi (PDF) {shipment.delivery_type !== 'Ofis Teslim' && <Text type="danger">*</Text>}
-                    </Text>
-                    {shipment.cargo_pdf_url ? (
-                      <Space>
-                        <Tag color="green" icon={<PaperClipOutlined />}>
-                          <a href={shipment.cargo_pdf_url} target="_blank" rel="noreferrer">
-                            Kargo Fişi Yüklendi
-                          </a>
-                        </Tag>
+                  {/* Kargo Fişi PDF — Ofis Teslim'de gösterilmez */}
+                  {shipment.delivery_type !== 'Ofis Teslim' && (
+                    <div style={{ marginBottom: 12 }}>
+                      <Text style={{ display: 'block', marginBottom: 6 }}>
+                        Kargo Fişi (PDF) <Text type="danger">*</Text>
+                      </Text>
+                      {shipment.cargo_pdf_url ? (
+                        <Space>
+                          <Tag color="green" icon={<PaperClipOutlined />}>
+                            <a href={shipment.cargo_pdf_url} target="_blank" rel="noreferrer">
+                              Kargo Fişi Yüklendi
+                            </a>
+                          </Tag>
+                          <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
+                            <Button size="small">Değiştir</Button>
+                          </Upload>
+                        </Space>
+                      ) : (
                         <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
-                          <Button size="small">Değiştir</Button>
+                          <Button icon={<UploadOutlined />} loading={uploadingPdf}>PDF Yükle</Button>
                         </Upload>
-                      </Space>
-                    ) : (
-                      <Upload customRequest={uploadCargoPdf} showUploadList={false} accept=".pdf">
-                        <Button icon={<UploadOutlined />} loading={uploadingPdf}>PDF Yükle</Button>
-                      </Upload>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Fotoğraflar */}
                   <div>
