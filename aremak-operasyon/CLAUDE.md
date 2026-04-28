@@ -242,6 +242,10 @@ Domain whitelist: `api.teamgram.com`, `teamgram.com`, `cdn.teamgram.com`
   - Ürün arama: `GET /products?filter[code]={sku}` (stok koduna göre)
   - Ürün listesi: `GET /products?page[number]=X&page[size]=25` — max 25 (100 → 422), `meta.total_pages` ile sayfalama, sayfalar arası 0.3s bekleme (429 koruması)
   - Ürün URL formatı: `https://uygulama.parasut.com/{company}/hizmet-ve-urunler/{id}`
+  - **`page[size]` max=25 — TÜM endpointlerde** (`products`, `sales_invoices`, `shipment_documents`, `contacts` vs). 26+ → `422`. `min(size, 25)` ile clamp et.
+  - Fatura listesi (cari bazlı): `GET /sales_invoices?filter[contact_id]={cid}&sort=-issue_date&page[size]=25`
+  - İrsaliye listesi (cari bazlı): `GET /shipment_documents?filter[contact_id]={cid}&sort=-issue_date&page[size]=25`
+  - VKN aramada bazı carilerde sıfır-prefix farkı olabilir → fallback olarak `lstrip('0')` versiyonunu da dene.
 
 ---
 
