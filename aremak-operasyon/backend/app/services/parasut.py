@@ -610,16 +610,24 @@ async def create_irsaliye_from_invoice(
 
 
 async def search_contact_by_tax_number(tax_number: str) -> Optional[str]:
-    """Paraşüt'te VKN ile cari arar, bulursa contact id döner."""
+    """Paraşüt'te VKN ile cari arar, bulursa contact id döner.
+    TG bazen baştaki sıfırlarla VKN tutar (ör. 0080673166), Paraşüt sıfırsız tutabilir.
+    Birden fazla varyantı dener."""
     if not tax_number:
         return None
-    try:
-        data = await _api_get("contacts", {"filter[tax_number]": tax_number.strip(), "page[size]": 5})
-        items = data.get("data", [])
-        if items:
-            return items[0]["id"]
-    except Exception as e:
-        logger.warning(f"Paraşüt contact arama hatası (vkn={tax_number}): {e}")
+    raw = tax_number.strip()
+    candidates = [raw]
+    stripped = raw.lstrip("0")
+    if stripped and stripped != raw:
+        candidates.append(stripped)
+    for vkn in candidates:
+        try:
+            data = await _api_get("contacts", {"filter[tax_number]": vkn, "page[size]": 5})
+            items = data.get("data", [])
+            if items:
+                return items[0]["id"]
+        except Exception as e:
+            logger.warning(f"Paraşüt contact arama hatası (vkn={vkn}): {e}")
     return None
 
 
