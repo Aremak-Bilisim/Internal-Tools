@@ -628,6 +628,17 @@ async def search_contact_by_tax_number(tax_number: str) -> Optional[str]:
                 return items[0]["id"]
         except Exception as e:
             logger.warning(f"Paraşüt contact arama hatası (vkn={vkn}): {e}")
+    # tax_number filter çalışmazsa filter[query] ile dene (genel arama)
+    for vkn in candidates:
+        try:
+            data = await _api_get("contacts", {"filter[query]": vkn, "page[size]": 10})
+            items = data.get("data", [])
+            for it in items:
+                attrs = it.get("attributes", {}) or {}
+                if (attrs.get("tax_number") or "").strip() in candidates:
+                    return it["id"]
+        except Exception as e:
+            logger.warning(f"Paraşüt contact query hatası (vkn={vkn}): {e}")
     return None
 
 
@@ -692,11 +703,12 @@ async def list_irsaliyes_by_contact_id(contact_id: str, page_size: int = 30) -> 
 
 
 async def search_contact_by_name(name: str) -> Optional[str]:
-    """Paraşüt'te isim ile cari arar, bulursa contact id döner."""
+    """Paraşüt'te isim ile cari arar, bulursa contact id döner.
+    filter[query] kullanır (filter[name] exact match yapar — yetersiz)."""
     if not name:
         return None
     try:
-        data = await _api_get("contacts", {"filter[name]": name.strip(), "page[size]": 5})
+        data = await _api_get("contacts", {"filter[query]": name.strip(), "page[size]": 5})
         items = data.get("data", [])
         if items:
             return items[0]["id"]

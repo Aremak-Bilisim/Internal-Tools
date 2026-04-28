@@ -160,11 +160,15 @@ export default function ShipmentDetailPage() {
     setEditDrawerOpen(true)
     setEditIrsaliyes([])
 
-    // VKN ile mevcut Paraşüt irsaliyelerini arka planda çek
+    // VKN/isim ile mevcut Paraşüt irsaliyelerini arka planda çek
     const taxNo = (order?.RelatedEntity?.TaxNo || '').trim()
-    if (taxNo) {
+    const cName = (order?.RelatedEntity?.Displayname || order?.RelatedEntity?.Name || shipment?.customer_name || '').trim()
+    if (taxNo || cName) {
       setEditIrsaliyesLoading(true)
-      api.get(`/parasut/irsaliyes/by-vkn?vkn=${encodeURIComponent(taxNo)}`)
+      const p = new URLSearchParams()
+      if (taxNo) p.set('vkn', taxNo)
+      if (cName) p.set('name', cName)
+      api.get(`/parasut/irsaliyes/by-vkn?${p.toString()}`)
         .then(r => setEditIrsaliyes(r.data?.irsaliyes || []))
         .catch(() => setEditIrsaliyes([]))
         .finally(() => setEditIrsaliyesLoading(false))
@@ -347,17 +351,21 @@ export default function ShipmentDetailPage() {
 
   const openMatchModal = async (type) => {
     const taxNo = (order?.RelatedEntity?.TaxNo || '').trim()
+    const customerName = (order?.RelatedEntity?.Displayname || order?.RelatedEntity?.Name || shipment?.customer_name || '').trim()
     setMatchModal({ open: true, type })
     setMatchList([])
     setMatchSelected(null)
-    if (!taxNo) {
-      message.warning('TG siparişinde VKN yok, eşleştirme yapılamaz')
+    if (!taxNo && !customerName) {
+      message.warning('Sipariş/sevk talebinde VKN veya isim yok, eşleştirme yapılamaz')
       return
     }
     setMatchLoading(true)
     try {
       const path = type === 'invoice' ? 'invoices/by-vkn' : 'irsaliyes/by-vkn'
-      const r = await api.get(`/parasut/${path}?vkn=${encodeURIComponent(taxNo)}`)
+      const params = new URLSearchParams()
+      if (taxNo) params.set('vkn', taxNo)
+      if (customerName) params.set('name', customerName)
+      const r = await api.get(`/parasut/${path}?${params.toString()}`)
       setMatchList(type === 'invoice' ? (r.data?.invoices || []) : (r.data?.irsaliyes || []))
     } catch (e) {
       message.error('Liste alınamadı')

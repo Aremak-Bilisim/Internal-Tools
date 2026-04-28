@@ -359,11 +359,15 @@ export default function OrdersPage() {
       _irsaliye_mode: 'new',
     })
 
-    // VKN ile mevcut Paraşüt irsaliyelerini arka planda çek
+    // VKN/isim ile mevcut Paraşüt irsaliyelerini arka planda çek
     const taxNo = (order.RelatedEntity?.TaxNo || '').trim()
-    if (taxNo) {
+    const cName = (order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || '').trim()
+    if (taxNo || cName) {
       setLoadingIrsaliyes(true)
-      api.get(`/parasut/irsaliyes/by-vkn?vkn=${encodeURIComponent(taxNo)}`)
+      const p = new URLSearchParams()
+      if (taxNo) p.set('vkn', taxNo)
+      if (cName) p.set('name', cName)
+      api.get(`/parasut/irsaliyes/by-vkn?${p.toString()}`)
         .then(r => setExistingIrsaliyes(r.data?.irsaliyes || []))
         .catch(() => setExistingIrsaliyes([]))
         .finally(() => setLoadingIrsaliyes(false))

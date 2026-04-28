@@ -34,12 +34,23 @@ async def refresh_invoices(current_user=Depends(get_current_user)):
     return {"invoices": invoices, "count": len(invoices)}
 
 
+async def _resolve_contact(vkn: str | None, name: str | None) -> str | None:
+    """VKN -> name fallback ile Paraşüt'te cari ID döndürür."""
+    if vkn and vkn.strip():
+        cid = await parasut.search_contact_by_tax_number(vkn.strip())
+        if cid:
+            return cid
+    if name and name.strip():
+        cid = await parasut.search_contact_by_name(name.strip())
+        if cid:
+            return cid
+    return None
+
+
 @router.get("/invoices/by-vkn")
-async def list_invoices_by_vkn(vkn: str, current_user=Depends(get_current_user)):
-    """VKN ile Paraşüt'te cari bul, ona ait satış faturalarını tarihe göre azalan döndür."""
-    if not vkn or not vkn.strip():
-        return {"contact_id": None, "invoices": []}
-    contact_id = await parasut.search_contact_by_tax_number(vkn.strip())
+async def list_invoices_by_vkn(vkn: str = "", name: str = "", current_user=Depends(get_current_user)):
+    """VKN ile Paraşüt'te cari bul, bulamazsa isim ile dene; o cariye ait satış faturalarını döner."""
+    contact_id = await _resolve_contact(vkn, name)
     if not contact_id:
         return {"contact_id": None, "invoices": []}
     invoices = await parasut.list_invoices_by_contact_id(contact_id)
@@ -47,11 +58,9 @@ async def list_invoices_by_vkn(vkn: str, current_user=Depends(get_current_user))
 
 
 @router.get("/irsaliyes/by-vkn")
-async def list_irsaliyes_by_vkn(vkn: str, current_user=Depends(get_current_user)):
-    """VKN ile Paraşüt'te cari bul, ona ait irsaliyeleri tarihe göre azalan döndür."""
-    if not vkn or not vkn.strip():
-        return {"contact_id": None, "irsaliyes": []}
-    contact_id = await parasut.search_contact_by_tax_number(vkn.strip())
+async def list_irsaliyes_by_vkn(vkn: str = "", name: str = "", current_user=Depends(get_current_user)):
+    """VKN ile Paraşüt'te cari bul, bulamazsa isim ile dene; o cariye ait irsaliyeleri döner."""
+    contact_id = await _resolve_contact(vkn, name)
     if not contact_id:
         return {"contact_id": None, "irsaliyes": []}
     irsaliyes = await parasut.list_irsaliyes_by_contact_id(contact_id)
