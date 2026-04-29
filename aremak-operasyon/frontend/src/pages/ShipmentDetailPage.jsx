@@ -47,7 +47,7 @@ const STAGE_LABELS = {
 }
 
 const ADVANCE_LABELS = {
-  pending_admin: 'Onayla (Sevk Sorumlusuna Gönder)',
+  pending_admin: 'Onayla (Paraşüt Kontrolü Talep Et)',
   parasut_review: 'Paraşüt Onayı Talep Et',
   pending_parasut_approval: 'Paraşüt Belgelerini Onayla',
   preparing: 'Sevk Edildi Olarak İşaretle',
@@ -292,6 +292,9 @@ export default function ShipmentDetailPage() {
       if (noteModal === 'advance') {
         await api.post(`/shipments/${id}/advance`, { note: noteText || undefined })
         message.success('Aşama güncellendi')
+      } else if (noteModal === 'advance-skip') {
+        await api.post(`/shipments/${id}/advance`, { note: noteText || undefined, skip_parasut: true })
+        message.success('Onaylandı — doğrudan Sevke Hazırla aşamasına geçildi')
       } else if (noteModal === 'revision') {
         if (!noteText.trim()) { message.warning('Revizyon notu zorunludur'); setNoteModal('revision'); return }
         await api.post(`/shipments/${id}/request-revision`, { note: noteText })
@@ -610,9 +613,21 @@ export default function ShipmentDetailPage() {
                   </Button>
                 ) : (
                   canAdvance && (
-                    <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
-                      {ADVANCE_LABELS[shipment.stage]}
-                    </Button>
+                    <>
+                      <Button type="primary" icon={<CheckOutlined />} onClick={() => openNoteModal('advance')} loading={advancing}>
+                        {ADVANCE_LABELS[shipment.stage]}
+                      </Button>
+                      {shipment.stage === 'pending_admin' && user?.role === 'admin' && (
+                        <Button
+                          icon={<CheckOutlined />}
+                          onClick={() => openNoteModal('advance-skip')}
+                          loading={advancing}
+                          style={{ borderColor: '#52c41a', color: '#52c41a' }}
+                        >
+                          Onayla (Paraşüt Kontrolünü Atla)
+                        </Button>
+                      )}
+                    </>
                   )
                 )}
                 {canRequestRevision && (
@@ -640,6 +655,7 @@ export default function ShipmentDetailPage() {
                 noteModal === 'reject' ? 'İptal Et — Not Ekle'
                 : noteModal === 'revision' ? 'Revizyon Talep Et'
                 : noteModal === 'return-to-parasut' ? 'Paraşüt Kontrolünü Tekrarla'
+                : noteModal === 'advance-skip' ? 'Onayla (Paraşüt Kontrolünü Atla) — Not Ekle'
                 : `${ADVANCE_LABELS[shipment?.stage] || 'Onayla'} — Not Ekle`
               }
               open={!!noteModal}

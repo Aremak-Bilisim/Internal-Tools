@@ -69,6 +69,7 @@ class StageAdvance(BaseModel):
     note: Optional[str] = None
     cargo_tracking_no: Optional[str] = None
     cargo_photo_urls: Optional[list] = None
+    skip_parasut: bool = False    # pending_admin'de True ise dogrudan preparing'e atla
 
 
 def _shipment_to_dict(s: ShipmentRequest) -> dict:
@@ -469,6 +470,9 @@ def advance_stage(
 
     old_stage = s.stage
     new_stage = transition["next"]
+    # Admin "Paraşüt Kontrolünü Atla" seçeneği: pending_admin → doğrudan preparing
+    if old_stage == "pending_admin" and data.skip_parasut and current_user.role == "admin":
+        new_stage = "preparing"
     s.stage = new_stage
 
     if data.cargo_tracking_no:
