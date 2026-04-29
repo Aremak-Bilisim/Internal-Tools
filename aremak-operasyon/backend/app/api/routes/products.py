@@ -119,6 +119,50 @@ async def get_brands(
 
 # ── CATEGORIES ────────────────────────────────────────────────────────────────
 
+@router.get("/incoming-summary")
+async def incoming_purchase_summary(current_user=Depends(get_current_user)):
+    """Açık tedarikçi siparişlerinden gelecek toplam adetleri ürün bazında döndürür.
+    Response: {tg_product_id: total_qty}. TG rate-limit'e karşı semaphore(3)."""
+    import asyncio as _asyncio
+    # Open purchases (Status=OpenRequested = fid 0)
+    page = 1
+    open_ids: list[int] = []
+    while True:
+        try:
+            data = await teamgram.get_purchases(page=page, pagesize=50)
+        except Exception:
+            break
+        for p in data.get("List") or []:
+            if p.get("Status") == 0:  # OpenRequested
+                open_ids.append(p["Id"])
+        if page >= 5 or len(data.get("List") or []) < 50:
+            break
+        page += 1
+
+    sem = _asyncio.Semaphore(3)
+
+    async def _fetch(pid: int):
+        async with sem:
+            try:
+                return await teamgram.get_purchase(pid)
+            except Exception:
+                return None
+
+    results = await _asyncio.gather(*[_fetch(pid) for pid in open_ids])
+    summary: dict[int, float] = {}
+    for r in results:
+        if not r:
+            continue
+        for it in r.get("Items") or []:
+            prod = it.get("Product") or {}
+            pid = prod.get("Id")
+            qty = float(it.get("Quantity") or 0)
+            if not pid or qty <= 0:
+                continue
+            summary[pid] = summary.get(pid, 0) + qty
+    return {"count": len(open_ids), "products": {str(k): v for k, v in summary.items()}}
+
+
 @router.get("/categories")
 async def get_categories(current_user=Depends(get_current_user)):
     meta = await teamgram.get_metadata()

@@ -139,6 +139,13 @@ export default function ProductsPage() {
   const [detailRecord, setDetailRecord] = useState(null)
   const [parasutCheck, setParasutCheck] = useState(null)   // null | {loading} | {found, ...}
   const [parasutLoading, setParasutLoading] = useState(false)
+  const [incomingMap, setIncomingMap] = useState({})  // {tg_product_id: qty}
+
+  useEffect(() => {
+    api.get('/products/incoming-summary')
+      .then(r => setIncomingMap(r.data?.products || {}))
+      .catch(() => {})
+  }, [])
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -404,6 +411,16 @@ export default function ProductsPage() {
         if (r.no_inventory) return <Tag>Takipsiz</Tag>
         const v = r.inventory ?? 0
         return <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>
+      },
+    },
+    {
+      title: 'Tedarikçi Sip.',
+      key: 'incoming',
+      width: 110,
+      align: 'center',
+      render: (_, r) => {
+        const q = incomingMap[String(r.tg_id)] || 0
+        return q > 0 ? <Tag color="blue">{q}</Tag> : <Text type="secondary">-</Text>
       },
     },
     {
@@ -1087,6 +1104,12 @@ export default function ProductsPage() {
                   {formatPrice(detailRecord.purchase_price, detailRecord.purchase_currency_name)}
                 </Descriptions.Item>
               )}
+              <Descriptions.Item label="Tedarikçi Sip.">
+                {(() => {
+                  const q = incomingMap[String(detailRecord.tg_id)] || 0
+                  return q > 0 ? <Tag color="blue">{q}</Tag> : <Text type="secondary">-</Text>
+                })()}
+              </Descriptions.Item>
               <Descriptions.Item label="KDV">{detailRecord.vat != null ? `%${detailRecord.vat}` : '-'}</Descriptions.Item>
               <Descriptions.Item label="Birim">{detailRecord.unit || '-'}</Descriptions.Item>
               <Descriptions.Item label="Stok">
