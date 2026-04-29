@@ -427,6 +427,15 @@ export default function ProductsPage() {
       render: (_, r) => formatPrice(r.purchase_price, r.purchase_currency_name),
     }]),
     {
+      title: 'Datasheet',
+      key: 'datasheet',
+      width: 100,
+      align: 'center',
+      render: (_, r) => r.datasheet_url
+        ? <a href={r.datasheet_url} target="_blank" rel="noreferrer"><FilePdfOutlined style={{ color: '#ff4d4f', fontSize: 16 }} /></a>
+        : <Text type="secondary">-</Text>,
+    },
+    {
       title: 'SKU',
       dataIndex: 'sku',
       key: 'sku',
