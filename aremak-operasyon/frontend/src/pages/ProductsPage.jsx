@@ -87,6 +87,7 @@ function formatPrice(price, currency) {
 export default function ProductsPage() {
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
+  const isSales = user?.role === 'sales'
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -419,12 +420,12 @@ export default function ProductsPage() {
       width: 130,
       render: (_, r) => formatPrice(r.price, r.currency_name),
     },
-    {
+    ...(isSales ? [] : [{
       title: 'Alış Fiyatı',
       key: 'purchase',
       width: 130,
       render: (_, r) => formatPrice(r.purchase_price, r.purchase_currency_name),
-    },
+    }]),
     {
       title: 'SKU',
       dataIndex: 'sku',
@@ -1072,9 +1073,11 @@ export default function ProductsPage() {
               <Descriptions.Item label="Satış Fiyatı">
                 {formatPrice(detailRecord.price, detailRecord.currency_name)}
               </Descriptions.Item>
-              <Descriptions.Item label="Alış Fiyatı">
-                {formatPrice(detailRecord.purchase_price, detailRecord.purchase_currency_name)}
-              </Descriptions.Item>
+              {!isSales && (
+                <Descriptions.Item label="Alış Fiyatı">
+                  {formatPrice(detailRecord.purchase_price, detailRecord.purchase_currency_name)}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="KDV">{detailRecord.vat != null ? `%${detailRecord.vat}` : '-'}</Descriptions.Item>
               <Descriptions.Item label="Birim">{detailRecord.unit || '-'}</Descriptions.Item>
               <Descriptions.Item label="Stok">
