@@ -133,7 +133,8 @@ export default function OrdersPage() {
         if (!nameMap[nameKey]) nameMap[nameKey] = []
         nameMap[nameKey].push(inv)
       }
-      const taxKey = (inv.contact_tax_number || '').trim()
+      // VKN'yi normalize et (TG bazen boşluklu tutuyor: "380 108 3026" vs "3801083026")
+      const taxKey = (inv.contact_tax_number || '').replace(/\D/g, '')
       if (taxKey) {
         if (!taxMap[taxKey]) taxMap[taxKey] = []
         taxMap[taxKey].push(inv)
@@ -274,7 +275,7 @@ export default function OrdersPage() {
       for (const order of orders) {
         if (result[order.Id]) continue
 
-        const taxNo = (order.RelatedEntity?.TaxNo || '').trim()
+        const taxNo = (order.RelatedEntity?.TaxNo || '').replace(/\D/g, '')
         const name = order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || ''
         const normName = normalize(name)
 
@@ -388,7 +389,7 @@ export default function OrdersPage() {
     })
 
     // VKN/isim ile mevcut Paraşüt irsaliyelerini arka planda çek
-    const taxNo = (order.RelatedEntity?.TaxNo || '').trim()
+    const taxNo = (order.RelatedEntity?.TaxNo || '').replace(/\D/g, '')
     const cName = (order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || '').trim()
     if (taxNo || cName) {
       setLoadingIrsaliyes(true)

@@ -615,11 +615,13 @@ async def search_contact_by_tax_number(tax_number: str) -> Optional[str]:
     Birden fazla varyantı dener."""
     if not tax_number:
         return None
+    import re as _re
     raw = tax_number.strip()
-    candidates = [raw]
-    stripped = raw.lstrip("0")
-    if stripped and stripped != raw:
-        candidates.append(stripped)
+    digits_only = _re.sub(r"\D", "", raw)
+    candidates = []
+    for v in [raw, digits_only, digits_only.lstrip("0")]:
+        if v and v not in candidates:
+            candidates.append(v)
     for vkn in candidates:
         try:
             data = await _api_get("contacts", {"filter[tax_number]": vkn, "page[size]": 5})

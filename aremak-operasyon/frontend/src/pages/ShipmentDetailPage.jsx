@@ -161,7 +161,7 @@ export default function ShipmentDetailPage() {
     setEditIrsaliyes([])
 
     // VKN/isim ile mevcut Paraşüt irsaliyelerini arka planda çek
-    const taxNo = (order?.RelatedEntity?.TaxNo || '').trim()
+    const taxNo = (order?.RelatedEntity?.TaxNo || '').replace(/\D/g, '')
     const cName = (order?.RelatedEntity?.Displayname || order?.RelatedEntity?.Name || shipment?.customer_name || '').trim()
     if (taxNo || cName) {
       setEditIrsaliyesLoading(true)
@@ -350,7 +350,7 @@ export default function ShipmentDetailPage() {
   }
 
   const openMatchModal = async (type) => {
-    const taxNo = (order?.RelatedEntity?.TaxNo || '').trim()
+    const taxNo = (order?.RelatedEntity?.TaxNo || '').replace(/\D/g, '')
     const customerName = (order?.RelatedEntity?.Displayname || order?.RelatedEntity?.Name || shipment?.customer_name || '').trim()
     setMatchModal({ open: true, type })
     setMatchList([])

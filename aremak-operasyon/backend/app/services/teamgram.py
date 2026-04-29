@@ -156,18 +156,32 @@ async def search_company_by_tax_no(tax_no: str) -> Optional[dict]:
     Returns company dict {Id, Displayname, TaxNo} or None."""
     if not tax_no:
         return None
+    import re as _re
     raw = tax_no.strip()
-    candidates = [raw]
-    stripped = raw.lstrip("0")
-    if stripped and stripped != raw:
-        candidates.append(stripped)
+    digits_only = _re.sub(r"\D", "", raw)
+    candidates = []
+    for v in [raw, digits_only, digits_only.lstrip("0")]:
+        if v and v not in candidates:
+            candidates.append(v)
     # Search via local mirror (TG /Companies/Index VKN filter desteklemiyor)
+    # Hem stored hem normalize edilmiş VKN ile karşılaştır (TG'de bazı kayıtlar
+    # boşluklu, bazıları boşluksuz tutuluyor)
     from app.core.database import SessionLocal
     from app.models.teamgram_company import TeamgramCompany
+    from sqlalchemy import or_
     with SessionLocal() as db:
+        # Tüm boş olmayan tax_no'lu kayıtları çekip lokal normalize ile karşılaştır
+        # (mirror küçük boyutlu — pratik bir maliyet)
         for vkn in candidates:
             row = db.query(TeamgramCompany).filter(TeamgramCompany.tax_no == vkn).first()
             if row:
+                return {"Id": row.tg_id, "Displayname": row.name, "TaxNo": row.tax_no}
+        # Hiçbiri eşleşmediyse mirror'da boşluklu/format farklı kayıtlar olabilir — normalize karşılaştır
+        target = digits_only or raw
+        rows = db.query(TeamgramCompany).filter(TeamgramCompany.tax_no.isnot(None)).all()
+        for row in rows:
+            row_norm = _re.sub(r"\D", "", row.tax_no or "")
+            if row_norm and (row_norm == target or row_norm.lstrip("0") == target.lstrip("0")):
                 return {"Id": row.tg_id, "Displayname": row.name, "TaxNo": row.tax_no}
     return None
 
