@@ -114,6 +114,10 @@ export default function OrdersPage() {
   const irsaliyeMode = Form.useWatch('_irsaliye_mode', form)  // 'new' | 'existing'
   const [existingIrsaliyes, setExistingIrsaliyes] = useState([])
   const [loadingIrsaliyes, setLoadingIrsaliyes] = useState(false)
+  // Aynı VKN'ye bağlı tüm Paraşüt faturaları (manuel değiştirme için)
+  const [availableInvoices, setAvailableInvoices] = useState([])
+  const [loadingInvoices, setLoadingInvoices] = useState(false)
+  const overrideInvoiceId = Form.useWatch('_override_invoice_id', form)
 
   useEffect(() => {
     if (teslimSekli === 'Kargo' && !form.getFieldValue('cargo_company')) {
@@ -379,6 +383,7 @@ export default function OrdersPage() {
       .then(res => buildInvoiceMaps(res.data.invoices))
       .catch(() => { /* sessiz fail; mevcut cache kullanılır */ })
     form.resetFields()
+    const autoMatchedInv = findInvoice(order)
     form.setFieldsValue({
       customer_name: customerName,
       assigned_to_id: gulAtes?.id ?? undefined,
@@ -386,20 +391,30 @@ export default function OrdersPage() {
       cargo_company: 'Yurtiçi Kargo',
       planned_ship_date: dayjs(),
       _irsaliye_mode: 'new',
+      _override_invoice_id: autoMatchedInv?.id || undefined,
     })
 
     // VKN/isim ile mevcut Paraşüt irsaliyelerini arka planda çek
     const taxNo = (order.RelatedEntity?.TaxNo || '').replace(/\D/g, '')
     const cName = (order.RelatedEntity?.Displayname || order.RelatedEntity?.Name || '').trim()
     if (taxNo || cName) {
-      setLoadingIrsaliyes(true)
       const p = new URLSearchParams()
       if (taxNo) p.set('vkn', taxNo)
       if (cName) p.set('name', cName)
+      setLoadingIrsaliyes(true)
       api.get(`/parasut/irsaliyes/by-vkn?${p.toString()}`)
         .then(r => setExistingIrsaliyes(r.data?.irsaliyes || []))
         .catch(() => setExistingIrsaliyes([]))
         .finally(() => setLoadingIrsaliyes(false))
+
+      setLoadingInvoices(true)
+      setAvailableInvoices([])
+      api.get(`/parasut/invoices/by-vkn?${p.toString()}`)
+        .then(r => setAvailableInvoices(r.data?.invoices || []))
+        .catch(() => setAvailableInvoices([]))
+        .finally(() => setLoadingInvoices(false))
+    } else {
+      setAvailableInvoices([])
     }
     try {
       const res = await api.get(`/orders/${order.Id}`)
@@ -465,12 +480,20 @@ export default function OrdersPage() {
           return
         }
       }
-      // İrsaliye seçiliyse fatura zorunlu (mevcut irsaliye seçimi hariç)
+      // Fatura: kullanıcı manuel seçim yaptıysa (override) onu kullan, yoksa otomatik eşleşene düş
       const docType = values.shipping_doc_type || ''
-      const inv = findInvoice(drawerOrder)
+      let inv = null
+      if (values._override_invoice_id) {
+        inv = availableInvoices.find(i => i.id === values._override_invoice_id) || null
+      }
+      if (!inv) inv = findInvoice(drawerOrder)
       const usingExistingIrsaliye = values._irsaliye_mode === 'existing'
       if (docType.includes('İrsaliye') && !inv && !usingExistingIrsaliye) {
-        message.error('Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. Devam etmek için önce Paraşüt\'te fatura oluşturun ve faturaları yenileyin.')
+        message.error('Gönderim belgesi İrsaliye seçildi ancak Paraşüt faturası seçilmedi. Lütfen aynı VKN\'ye ait faturalardan birini seçin.')
+        return
+      }
+      if (docType === 'Fatura' && !inv) {
+        message.error('Fatura seçimi zorunlu. Aynı VKN\'ye ait faturalardan birini seçin veya Paraşüt\'te fatura oluşturup yenileyin.')
         return
       }
 
@@ -933,9 +956,28 @@ export default function OrdersPage() {
             </Form.Item>
 
             {(gonderiTuru === 'Fatura' || gonderiTuru === 'Fatura + İrsaliye') && (
-              <Form.Item name="invoice_note" label="Fatura Notu">
-                <TextArea rows={2} placeholder="Vergi dairesi, açıklama notu vb." />
-              </Form.Item>
+              <>
+                <Form.Item
+                  name="_override_invoice_id"
+                  label="Eşleşen Fatura"
+                  tooltip="Otomatik eşleşen fatura seçili. Yanlış eşleştiyse veya yoksa, aynı VKN'ye ait diğer faturalardan birini seçebilirsiniz."
+                >
+                  <Select
+                    placeholder={loadingInvoices ? 'Yükleniyor...' : 'Fatura seç...'}
+                    loading={loadingInvoices}
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    options={availableInvoices.map(i => ({
+                      value: i.id,
+                      label: `${i.issue_date || '-'} • ${i.invoice_no || 'TASLAK'} • ${i.gross_total || ''} ${i.currency || ''} ${i.description ? '• ' + i.description : ''}`.trim(),
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item name="invoice_note" label="Fatura Notu">
+                  <TextArea rows={2} placeholder="Vergi dairesi, açıklama notu vb." />
+                </Form.Item>
+              </>
             )}
 
             {(gonderiTuru === 'İrsaliye' || gonderiTuru === 'Fatura + İrsaliye') && (
