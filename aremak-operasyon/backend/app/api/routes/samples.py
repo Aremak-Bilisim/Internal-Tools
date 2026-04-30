@@ -444,6 +444,30 @@ def request_revision(
     return _sample_to_dict(s)
 
 
+class MatchIrsaliyeIn(BaseModel):
+    irsaliye_id: str
+
+
+@router.post("/{sample_id}/match-irsaliye")
+def match_irsaliye(
+    sample_id: int,
+    data: MatchIrsaliyeIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin")),
+):
+    """Admin: numune sevkine Paraşüt irsaliyesini manuel eşleştir/değiştir.
+    Tüm aşamalarda izinli (sevk edilmiş numunelerde de geçerli)."""
+    s = db.query(SampleRequest).filter(SampleRequest.id == sample_id).first()
+    if not s:
+        raise HTTPException(404, "Numune talebi bulunamadı")
+    if not data.irsaliye_id or not data.irsaliye_id.strip():
+        raise HTTPException(400, "irsaliye_id gerekli")
+    s.irsaliye_id = data.irsaliye_id.strip()
+    db.commit()
+    db.refresh(s)
+    return _sample_to_dict(s)
+
+
 @router.post("/{sample_id}/cancel")
 def cancel_sample(
     sample_id: int,

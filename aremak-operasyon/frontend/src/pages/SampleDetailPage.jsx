@@ -56,6 +56,55 @@ export default function SampleDetailPage() {
   const [editSubmitting, setEditSubmitting] = useState(false)
   const editDeliveryType = Form.useWatch('delivery_type', editForm)
   const [irsaliye, setIrsaliye] = useState(null)
+  // Manuel irsaliye eşleştirme (admin)
+  const [matchOpen, setMatchOpen] = useState(false)
+  const [matchList, setMatchList] = useState([])
+  const [matchLoading, setMatchLoading] = useState(false)
+  const [matchSelected, setMatchSelected] = useState(null)
+  const [matchSubmitting, setMatchSubmitting] = useState(false)
+  const [tgOrder, setTgOrder] = useState(null)
+  const isAdmin = user?.role === 'admin'
+
+  const openMatchModal = async () => {
+    setMatchOpen(true)
+    setMatchSelected(sample?.irsaliye_id || null)
+    setMatchList([])
+    if (!sample) return
+    setMatchLoading(true)
+    try {
+      // VKN: TG fırsatından çek (varsa); yoksa sadece müşteri adıyla
+      let vkn = ''
+      const oppId = sample.tg_opportunity_id
+      if (oppId) {
+        try {
+          const tg = await api.get(`/orders/${oppId}`)
+          setTgOrder(tg.data)
+          vkn = (tg.data?.RelatedEntity?.TaxNo || '').replace(/\D/g, '')
+        } catch {}
+      }
+      const cName = (sample.customer_name || '').trim()
+      const p = new URLSearchParams()
+      if (vkn) p.set('vkn', vkn)
+      if (cName) p.set('name', cName)
+      const r = await api.get(`/parasut/irsaliyes/by-vkn?${p.toString()}`)
+      setMatchList(r.data?.irsaliyes || [])
+    } catch {
+      message.error('İrsaliye listesi alınamadı')
+    } finally { setMatchLoading(false) }
+  }
+
+  const submitMatch = async () => {
+    if (!matchSelected) { message.error('Bir irsaliye seçin'); return }
+    setMatchSubmitting(true)
+    try {
+      await api.post(`/samples/${id}/match-irsaliye`, { irsaliye_id: matchSelected })
+      message.success('İrsaliye eşleştirildi')
+      setMatchOpen(false)
+      load()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Eşleştirme başarısız')
+    } finally { setMatchSubmitting(false) }
+  }
 
   const load = () => {
     setLoading(true)
@@ -395,9 +444,18 @@ export default function SampleDetailPage() {
           </Card>
 
           {/* İrsaliye */}
-          {sample.irsaliye_id && (
-            <Card title="İrsaliye (Paraşüt)" size="small">
-              {irsaliye ? (
+          {(sample.irsaliye_id || isAdmin) && (
+            <Card
+              title="İrsaliye (Paraşüt)"
+              size="small"
+              extra={isAdmin && (
+                <Button size="small" onClick={openMatchModal}>
+                  {sample.irsaliye_id ? 'İrsaliyeyi Değiştir' : 'İrsaliye Eşleştir'}
+                </Button>
+              )}
+            >
+              {!sample.irsaliye_id && <Text type="secondary">Bu numune için irsaliye kaydı yok.</Text>}
+              {sample.irsaliye_id && (irsaliye ? (
                 <Descriptions column={2} size="small">
                   {irsaliye.contact_name && (
                     <Descriptions.Item label="Müşteri" span={2}>{irsaliye.contact_name}</Descriptions.Item>
@@ -416,7 +474,7 @@ export default function SampleDetailPage() {
                 </Descriptions>
               ) : (
                 <Spin size="small" />
-              )}
+              ))}
               {irsaliye?.url && (
                 <div style={{ marginTop: 12 }}>
                   <Button icon={<SendOutlined />} size="small" href={irsaliye.url} target="_blank" rel="noreferrer">
@@ -606,6 +664,40 @@ export default function SampleDetailPage() {
           </Form.List>
         </Form>
       </Drawer>
+
+      <Modal
+        title="İrsaliye Eşleştir"
+        open={matchOpen}
+        onOk={submitMatch}
+        onCancel={() => setMatchOpen(false)}
+        okText="Eşleştir"
+        cancelText="İptal"
+        confirmLoading={matchSubmitting}
+        width={680}
+        destroyOnClose
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          VKN: <Text code>{(tgOrder?.RelatedEntity?.TaxNo || '-')}</Text> · Müşteri: {sample?.customer_name || '-'}
+        </Text>
+        {matchLoading ? (
+          <Spin />
+        ) : matchList.length === 0 ? (
+          <Text type="secondary">Bu cariye ait irsaliye bulunamadı.</Text>
+        ) : (
+          <Select
+            style={{ width: '100%' }}
+            placeholder="Bir irsaliye seçin..."
+            value={matchSelected}
+            onChange={setMatchSelected}
+            showSearch
+            optionFilterProp="label"
+            options={matchList.map(it => ({
+              value: it.id,
+              label: `${it.issue_date || '-'} • ${it.gross_total ? `${it.gross_total} TL` : ''} ${it.description ? `• ${it.description}` : ''}`.trim(),
+            }))}
+          />
+        )}
+      </Modal>
     </div>
   )
 }
