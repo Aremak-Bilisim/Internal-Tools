@@ -64,6 +64,18 @@ export default function SampleDetailPage() {
   const [matchSubmitting, setMatchSubmitting] = useState(false)
   const [tgOrder, setTgOrder] = useState(null)
   const isAdmin = user?.role === 'admin'
+  const [irsaliyePdfLoading, setIrsaliyePdfLoading] = useState(false)
+
+  const openIrsaliyePdf = async () => {
+    if (!sample?.irsaliye_id) return
+    setIrsaliyePdfLoading(true)
+    try {
+      const res = await api.get(`/parasut/irsaliye/${sample.irsaliye_id}/pdf-url`)
+      window.open(res.data.url, '_blank')
+    } catch {
+      message.error('İrsaliye PDF\'i henüz hazır değil')
+    } finally { setIrsaliyePdfLoading(false) }
+  }
 
   const openMatchModal = async () => {
     setMatchOpen(true)
@@ -475,11 +487,22 @@ export default function SampleDetailPage() {
               ) : (
                 <Spin size="small" />
               ))}
-              {irsaliye?.url && (
-                <div style={{ marginTop: 12 }}>
-                  <Button icon={<SendOutlined />} size="small" href={irsaliye.url} target="_blank" rel="noreferrer">
-                    Paraşüt'te Görüntüle
+              {sample.irsaliye_id && (
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    icon={<FilePdfOutlined />}
+                    size="small"
+                    loading={irsaliyePdfLoading}
+                    onClick={openIrsaliyePdf}
+                    style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}
+                  >
+                    İrsaliye PDF
                   </Button>
+                  {irsaliye?.url && (
+                    <Button icon={<SendOutlined />} size="small" href={irsaliye.url} target="_blank" rel="noreferrer">
+                      Paraşüt'te Görüntüle
+                    </Button>
+                  )}
                 </div>
               )}
             </Card>
