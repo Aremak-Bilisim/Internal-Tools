@@ -76,9 +76,38 @@ export default function PurchaseRequestsPage() {
     const v = await newSupplierForm.validateFields()
     setNewSupplierSubmitting(true)
     try {
+      // Duplicate kontrol: TG'de aynı isimde tedarikçi varsa kullanıcıya seçim ver
+      try {
+        const sr = await api.get(`/purchase-requests/suppliers/search?q=${encodeURIComponent(v.name)}`)
+        const exact = (sr.data?.suppliers || []).filter(s =>
+          s.name.trim().toLowerCase() === v.name.trim().toLowerCase()
+        )
+        if (exact.length > 0) {
+          const choice = await new Promise(res => {
+            Modal.confirm({
+              title: `'${v.name}' zaten TG'de mevcut`,
+              content: `${exact.length} tedarikçi bulundu. Mevcudu kullan veya yeni yarat.`,
+              okText: 'Mevcudu Kullan', cancelText: 'Yine de Yeni Yarat',
+              onOk: () => res('use'), onCancel: () => res('create'),
+            })
+          })
+          if (choice === 'use') {
+            const first = exact[0]
+            addForm.setFieldValue('_supplier_id', first.id)
+            setSupplierOptions(prev => {
+              if (prev.some(o => o.value === first.id)) return prev
+              return [{ value: first.id, label: first.name, name: first.name }, ...prev]
+            })
+            setSupplierCreateOpen(false)
+            newSupplierForm.resetFields()
+            message.info(`Mevcut tedarikçi seçildi: ${first.name} (TG #${first.id})`)
+            return
+          }
+        }
+      } catch { /* arama hatası — yeni yaratmaya devam */ }
+
       const r = await api.post('/purchase-requests/suppliers', v)
       message.success(`Tedarikçi yaratıldı: ${r.data.name} (TG #${r.data.id})`)
-      // Yarattığın tedarikçiyi seçili yap
       addForm.setFieldValue('_supplier_id', r.data.id)
       addForm.setFieldValue('_supplier_name', r.data.name)
       setSupplierOptions(prev => [{ value: r.data.id, label: r.data.name, name: r.data.name }, ...prev])
