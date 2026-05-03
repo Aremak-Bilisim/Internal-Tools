@@ -104,6 +104,7 @@ export default function PurchaseRequestsPage() {
         product_id: v.product_id,
         quantity: v.quantity,
         unit_price: v.unit_price,
+        currency: v.currency,
         notes: v.notes,
       }
       if (v._supplier_id) {
@@ -342,6 +343,16 @@ export default function PurchaseRequestsPage() {
               loading={productLoading}
               filterOption={false}
               onSearch={onProductSearch}
+              onChange={(pid) => {
+                const p = products.find(x => x.id === pid)
+                if (p) {
+                  // Para birimi ve fiyatı ürünün varsayılanından doldur (kullanıcı override edebilir)
+                  addForm.setFieldsValue({
+                    currency: p.purchase_currency_name || addForm.getFieldValue('currency') || 'USD',
+                    unit_price: addForm.getFieldValue('unit_price') ?? p.purchase_price ?? null,
+                  })
+                }
+              }}
               notFoundContent={productLoading ? <Spin size="small" /> : null}
               options={products.map(p => ({
                 value: p.id,
@@ -372,8 +383,18 @@ export default function PurchaseRequestsPage() {
           <Form.Item name="quantity" label="Adet" rules={[{ required: true, message: 'Adet girin' }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="unit_price" label="Alış Fiyatı (opsiyonel — boş bırakılırsa ürünün varsayılanı kullanılır)">
-            <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+          <Form.Item label="Alış Fiyatı (opsiyonel — boş bırakılırsa ürünün varsayılanı kullanılır)">
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="unit_price" noStyle>
+                <InputNumber min={0} step={0.01} precision={2} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="currency" noStyle initialValue="USD">
+                <Select
+                  style={{ width: 90 }}
+                  options={[{ value: 'USD' }, { value: 'EUR' }, { value: 'TL' }, { value: 'TRY' }]}
+                />
+              </Form.Item>
+            </Space.Compact>
           </Form.Item>
           <Form.Item name="notes" label="Not (opsiyonel)">
             <Input.TextArea rows={2} />
