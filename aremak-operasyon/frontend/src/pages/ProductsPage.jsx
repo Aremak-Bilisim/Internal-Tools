@@ -2,12 +2,12 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Table, Input, Card, Tag, Typography, Spin, Button, Drawer, Form,
   InputNumber, Select, Row, Col, Space, Divider, Tooltip, Badge,
-  Popconfirm, message, Switch, Descriptions, Empty, AutoComplete,
+  Popconfirm, message, Switch, Descriptions, Empty, AutoComplete, Dropdown,
 } from 'antd'
 import {
   SearchOutlined, PlusOutlined, ReloadOutlined, EditOutlined, CopyOutlined,
   BoxPlotOutlined, LinkOutlined, CheckCircleOutlined, QuestionCircleOutlined,
-  DeleteOutlined, FilePdfOutlined,
+  DeleteOutlined, FilePdfOutlined, MoreOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
@@ -485,53 +485,50 @@ export default function ProductsPage() {
       render: (v) => <Text code style={{ fontSize: 11 }}>{v || '-'}</Text>,
     },
     {
-      title: 'Bağlantı',
-      key: 'links',
-      width: 90,
-      fixed: 'right',
-      render: (_, r) => (
-        <Space size={4}>
-          <Tooltip title="TeamGram'da Aç">
-            <a href={r.tg_url} target="_blank" rel="noreferrer">
-              <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 16 }} />
-            </a>
-          </Tooltip>
-          <Tooltip title={r.parasut_id ? "Paraşüt'te Aç" : "Paraşüt'te kayıtlı değil"}>
-            {r.parasut_id
-              ? <a href={r.parasut_url} target="_blank" rel="noreferrer">
-                  <CheckCircleOutlined style={{ color: '#1677ff', fontSize: 16 }} />
-                </a>
-              : <QuestionCircleOutlined style={{ color: '#d9d9d9', fontSize: 16 }} />
-            }
-          </Tooltip>
-        </Space>
-      ),
-    },
-    {
-      title: '',
+      title: 'İşlem',
       key: 'actions',
-      width: 60,
+      width: 80,
       fixed: 'right',
-      render: (_, r) => (
-        <Space>
-          <Tooltip title="Detay">
-            <Button
-              type="text"
-              size="small"
-              icon={<BoxPlotOutlined />}
-              onClick={() => { setDetailRecord(r); setDetailOpen(true); setParasutCheck(null) }}
-            />
-          </Tooltip>
-          <Tooltip title="Düzenle">
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => openEdit(r)}
-            />
-          </Tooltip>
-        </Space>
-      ),
+      align: 'center',
+      render: (_, r) => {
+        const items = [
+          {
+            key: 'detail', icon: <BoxPlotOutlined />,
+            label: 'Detay',
+            onClick: () => { setDetailRecord(r); setDetailOpen(true); setParasutCheck(null) },
+          },
+          ...(isAdmin ? [{
+            key: 'edit', icon: <EditOutlined />,
+            label: 'Düzenle',
+            onClick: () => openEdit(r),
+          }] : []),
+          ...(isAdmin ? [{
+            key: 'clone', icon: <CopyOutlined />,
+            label: 'Kopyasını Oluştur',
+            onClick: () => openCloneFrom(r),
+          }] : []),
+          { type: 'divider' },
+          {
+            key: 'tg', icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+            label: <a href={r.tg_url} target="_blank" rel="noreferrer">TeamGram'da Aç</a>,
+          },
+          {
+            key: 'parasut',
+            icon: r.parasut_id
+              ? <CheckCircleOutlined style={{ color: '#1677ff' }} />
+              : <QuestionCircleOutlined style={{ color: '#d9d9d9' }} />,
+            label: r.parasut_id
+              ? <a href={r.parasut_url} target="_blank" rel="noreferrer">Paraşüt'te Aç</a>
+              : <Text type="secondary">Paraşüt'te kayıtsız</Text>,
+            disabled: !r.parasut_id,
+          },
+        ]
+        return (
+          <Dropdown menu={{ items }} trigger={['click']} placement="bottomRight">
+            <Button type="text" size="small" icon={<MoreOutlined />} />
+          </Dropdown>
+        )
+      },
     },
   ]
 
