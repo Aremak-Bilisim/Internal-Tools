@@ -51,17 +51,67 @@ export default function PurchaseRequestsPage() {
     setProductSearchTimer(t)
   }
 
+  // Tedarikçi seçimi (manuel override)
+  const [supplierOptions, setSupplierOptions] = useState([])
+  const [supplierLoading, setSupplierLoading] = useState(false)
+  const [supplierSearchTimer, setSupplierSearchTimer] = useState(null)
+  const searchSuppliers = async (q = '') => {
+    setSupplierLoading(true)
+    try {
+      const r = await api.get(`/purchase-requests/suppliers/search?q=${encodeURIComponent(q)}`)
+      setSupplierOptions((r.data?.suppliers || []).map(s => ({ value: s.id, label: s.name + (s.brand_hint ? ` (${s.brand_hint})` : ''), name: s.name })))
+    } finally { setSupplierLoading(false) }
+  }
+  const onSupplierSearch = (q) => {
+    if (supplierSearchTimer) clearTimeout(supplierSearchTimer)
+    const t = setTimeout(() => searchSuppliers(q), 300)
+    setSupplierSearchTimer(t)
+  }
+
+  // Yeni tedarikçi yaratma modal'ı
+  const [supplierCreateOpen, setSupplierCreateOpen] = useState(false)
+  const [newSupplierForm] = Form.useForm()
+  const [newSupplierSubmitting, setNewSupplierSubmitting] = useState(false)
+  const submitNewSupplier = async () => {
+    const v = await newSupplierForm.validateFields()
+    setNewSupplierSubmitting(true)
+    try {
+      const r = await api.post('/purchase-requests/suppliers', v)
+      message.success(`Tedarikçi yaratıldı: ${r.data.name} (TG #${r.data.id})`)
+      // Yarattığın tedarikçiyi seçili yap
+      addForm.setFieldValue('_supplier_id', r.data.id)
+      addForm.setFieldValue('_supplier_name', r.data.name)
+      setSupplierOptions(prev => [{ value: r.data.id, label: r.data.name, name: r.data.name }, ...prev])
+      setSupplierCreateOpen(false)
+      newSupplierForm.resetFields()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Tedarikçi oluşturulamadı')
+    } finally { setNewSupplierSubmitting(false) }
+  }
+
   const openAddModal = () => {
     addForm.resetFields()
     setAddOpen(true)
-    loadProducts()  // ilk açılışta default 50 ürün
+    loadProducts()       // ilk açılışta default 50 ürün
+    searchSuppliers('')  // ilk açılışta default mapping'teki tedarikçiler
   }
 
   const submitAdd = async () => {
     const v = await addForm.validateFields()
     setSubmitting(true)
     try {
-      const r = await api.post('/purchase-requests/items', v)
+      const payload = {
+        product_id: v.product_id,
+        quantity: v.quantity,
+        unit_price: v.unit_price,
+        notes: v.notes,
+      }
+      if (v._supplier_id) {
+        payload.tg_supplier_id = v._supplier_id
+        const sel = supplierOptions.find(s => s.value === v._supplier_id)
+        payload.supplier_name = sel?.name || v._supplier_name || null
+      }
+      const r = await api.post('/purchase-requests/items', payload)
       if (r.data?.merged) message.success('Mevcut kaleme eklendi (adet birleşti)')
       else message.success('Eklendi')
       setAddOpen(false)
@@ -289,7 +339,7 @@ export default function PurchaseRequestsPage() {
               showSearch
               placeholder="Ürün ara (en az 2 karakter — marka, model, SKU)..."
               loading={productLoading}
-              filterOption={false}            /* server-side search */
+              filterOption={false}
               onSearch={onProductSearch}
               notFoundContent={productLoading ? <Spin size="small" /> : null}
               options={products.map(p => ({
@@ -297,6 +347,23 @@ export default function PurchaseRequestsPage() {
                 label: `${p.brand || ''} ${p.prod_model || ''} (${p.sku || '-'}) — Stok: ${p.inventory ?? 0}`,
               }))}
             />
+          </Form.Item>
+
+          <Form.Item
+            label="Tedarikçi (opsiyonel — boş bırakılırsa ürünün markasından otomatik)"
+            extra={<Button size="small" type="link" onClick={() => setSupplierCreateOpen(true)}>+ Yeni Tedarikçi Yarat</Button>}
+          >
+            <Form.Item name="_supplier_id" noStyle>
+              <Select
+                allowClear
+                showSearch
+                placeholder="Tedarikçi ara veya boş bırak..."
+                loading={supplierLoading}
+                filterOption={false}
+                onSearch={onSupplierSearch}
+                options={supplierOptions}
+              />
+            </Form.Item>
           </Form.Item>
           <Form.Item name="quantity" label="Adet" rules={[{ required: true, message: 'Adet girin' }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
@@ -306,6 +373,40 @@ export default function PurchaseRequestsPage() {
           </Form.Item>
           <Form.Item name="notes" label="Not (opsiyonel)">
             <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Yeni Tedarikçi Yarat (TG)"
+        open={supplierCreateOpen}
+        onCancel={() => setSupplierCreateOpen(false)}
+        onOk={submitNewSupplier}
+        confirmLoading={newSupplierSubmitting}
+        okText="Yarat" cancelText="İptal"
+        width={500}
+      >
+        <Form form={newSupplierForm} layout="vertical">
+          <Form.Item name="name" label="Şirket Adı" rules={[{ required: true }]}>
+            <Input placeholder="örn. IVS Technology" />
+          </Form.Item>
+          <Form.Item name="tax_no" label="VKN/TCKN">
+            <Input />
+          </Form.Item>
+          <Form.Item name="tax_office" label="Vergi Dairesi">
+            <Input />
+          </Form.Item>
+          <Form.Item name="address" label="Adres">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="city" label="Şehir">
+            <Input />
+          </Form.Item>
+          <Form.Item name="email" label="E-posta">
+            <Input type="email" />
+          </Form.Item>
+          <Form.Item name="phone" label="Telefon">
+            <Input />
           </Form.Item>
         </Form>
       </Modal>

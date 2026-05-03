@@ -96,6 +96,71 @@ def _list_to_dict(lst: PurchaseRequestList, products_incoming: dict[int, float])
     }
 
 
+# ── Tedarikçi (TG party) yardımcı endpoint'leri ───────────────────────────────
+
+@router.get("/suppliers/search")
+async def search_suppliers(q: str = Query(""), current_user=Depends(require_role("admin", "sales"))):
+    """TG'de şirket arama (manuel tedarikçi seçimi için).
+    Önce BRAND_SUPPLIER_MAP'te ada göre filtrele, sonra TG QuickSearch."""
+    out = []
+    qn = (q or "").strip().lower()
+    # 1. Yerel mapping'te eşleşenler
+    for brand, (sid, sname) in BRAND_SUPPLIER_MAP.items():
+        if not qn or qn in sname.lower() or qn in brand.lower():
+            out.append({"id": sid, "name": sname, "brand_hint": brand, "source": "mapping"})
+    # 2. TG QuickSearch (en az 2 char)
+    if len(qn) >= 2:
+        try:
+            data = await teamgram._get(f"aremak/Search/QuickSearch", {"query": q, "getcompany": True})
+            for x in (data.get("QuickResults") or [])[:20]:
+                t = (x.get("type") or "").lower()
+                if t.startswith(("compan", "part")):
+                    cid = x.get("id")
+                    if cid and not any(o["id"] == cid for o in out):
+                        out.append({"id": cid, "name": x.get("name") or "", "source": "tg"})
+        except Exception as e:
+            logger.warning(f"TG company search hatası: {e}")
+    return {"suppliers": out[:30]}
+
+
+class CreateSupplierBody(BaseModel):
+    name: str
+    tax_no: Optional[str] = None
+    tax_office: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+@router.post("/suppliers")
+async def create_supplier(
+    body: CreateSupplierBody,
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """TG'de yeni tedarikçi şirket yarat. Returns {id, name}."""
+    if not body.name.strip():
+        raise HTTPException(400, "İsim gerekli")
+    payload = {
+        "Name": body.name.strip(),
+        "TaxNo": body.tax_no or None,
+        "TaxOffice": body.tax_office or None,
+        "BasicRelationTypes": ["Vendor"],
+        "ContactInfoList": [
+            *([{"Type": "Email", "SubType": "Business", "Value": body.email}] if body.email else []),
+            *([{"Type": "Phone", "SubType": "Work", "Value": body.phone}] if body.phone else []),
+            *([{"Type": "Address", "SubType": "Business", "Value": body.address}] if body.address else []),
+        ],
+    }
+    try:
+        res = await teamgram.create_company(payload)
+    except Exception as e:
+        raise HTTPException(502, f"TG'de tedarikçi oluşturulamadı: {e}")
+    if not res.get("Result") or not res.get("Id"):
+        raise HTTPException(502, f"TG yanıtı: {res}")
+    return {"id": res["Id"], "name": body.name.strip()}
+
+
 @router.get("/lists")
 async def list_request_lists(
     status: str = Query("open"),
@@ -149,6 +214,9 @@ class AddItemBody(BaseModel):
     unit_price: Optional[float] = None
     currency: Optional[str] = None
     notes: Optional[str] = None
+    # Manuel tedarikçi override (brand mapping yerine)
+    tg_supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
 
 
 @router.post("/items")
@@ -161,10 +229,15 @@ def add_item(
     p = db.query(Product).filter(Product.id == body.product_id).first()
     if not p:
         raise HTTPException(404, "Ürün bulunamadı")
-    sup = _supplier_for_brand(p.brand)
-    if not sup:
-        raise HTTPException(400, f"'{p.brand or '?'}' markası için tedarikçi eşlemesi tanımlı değil")
-    sup_id, sup_name = sup
+    # Tedarikçi seçimi: body'de override varsa onu kullan, yoksa brand mapping
+    if body.tg_supplier_id:
+        sup_id = body.tg_supplier_id
+        sup_name = body.supplier_name or "Tedarikçi"
+    else:
+        sup = _supplier_for_brand(p.brand)
+        if not sup:
+            raise HTTPException(400, f"'{p.brand or '?'}' markası için tedarikçi eşlemesi tanımlı değil. Manuel tedarikçi seçin.")
+        sup_id, sup_name = sup
     lst = _ensure_open_list(db, sup_id, sup_name, current_user.id)
 
     # Aynı liste içinde aynı ürün varsa adet topla
