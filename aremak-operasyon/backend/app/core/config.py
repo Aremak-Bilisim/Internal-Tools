@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     HEPSIBURADA_WEBHOOK_USER: str = ""
     HEPSIBURADA_WEBHOOK_PASSWORD: str = ""
 
+    # Hepsiburada outbound API (Marketplace REST)
+    HEPSIBURADA_API_BASE_URL: str = "https://oms-external-sit.hepsiburada.com"   # SIT (test)
+    HEPSIBURADA_MERCHANT_ID: str = ""
+    HEPSIBURADA_SECRET_KEY: str = ""
+    HEPSIBURADA_USER_AGENT: str = ""
+
     class Config:
         env_file = ".env"
 

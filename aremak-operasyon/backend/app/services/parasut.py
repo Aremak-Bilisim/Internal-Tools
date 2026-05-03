@@ -391,6 +391,128 @@ async def _api_post(path: str, payload: dict) -> dict:
         return r.json() if r.content else {}
 
 
+async def create_or_get_contact(
+    name: str,
+    *,
+    tax_number: str = "11111111111",
+    tax_office: str = "",
+    email: str = "",
+    phone: str = "",
+    address: str = "",
+    city: str = "",
+    district: str = "",
+    contact_type: str = "person",         # person | company
+    account_type: str = "customer",
+    is_abroad: bool = False,
+) -> str:
+    """Paraşüt'te B2C cari (varsa kullan, yoksa yarat). Returns contact_id."""
+    # Önce isimle ara — VKN HB B2C'lerde dummy 11111111111 olduğu için aynı VKN ile
+    # birden fazla farklı kişi olabilir (her yeni HB siparişi yeni cari olmalı).
+    # Bu yüzden HB için tax_number filtresine güvenmeyeceğiz; isim+email ile arayacağız.
+    if email:
+        try:
+            data = await _api_get("contacts", {"filter[email]": email, "page[size]": 5})
+            for c in data.get("data", []):
+                attrs = c.get("attributes", {}) or {}
+                if (attrs.get("name") or "").strip().lower() == name.strip().lower():
+                    return c["id"]
+        except Exception as e:
+            logger.warning(f"contact email arama hatası ({email}): {e}")
+
+    payload = {
+        "data": {
+            "type": "contacts",
+            "attributes": {
+                "name": name,
+                "short_name": name,
+                "contact_type": contact_type,
+                "account_type": account_type,
+                "tax_number": tax_number,
+                "tax_office": tax_office or None,
+                "email": email or None,
+                "phone": phone or None,
+                "address": address or None,
+                "city": city or None,
+                "district": district or None,
+                "is_abroad": is_abroad,
+                "country": "Türkiye",
+            }
+        }
+    }
+    res = await _api_post("contacts", payload)
+    return res["data"]["id"]
+
+
+async def create_sales_invoice_for_hepsiburada(
+    contact_id: str,
+    description: str,
+    items: list[dict],            # [{product_id, quantity, unit_price, vat_rate, [description]}]
+    *,
+    issue_date: str,              # YYYY-MM-DD
+    billing_address: str = "",
+    city: str = "",
+    district: str = "",
+    tax_number: str = "11111111111",
+    tax_office: str = "",
+    currency: str = "TRL",
+    tag: str = "Hepsiburada",
+) -> dict:
+    """HB e-arşiv fatura yaratır (TEMELFATURA, cash_sale=True, shipment_included=True).
+    Returns full Paraşüt response (data.id = invoice_id)."""
+    details = []
+    for it in items:
+        attrs = {
+            "quantity": str(it["quantity"]),
+            "unit_price": str(it["unit_price"]),
+            "vat_rate": str(it.get("vat_rate", 20)),
+            "discount_type": "percentage",
+            "discount": "0.0",
+            "excise_duty_type": "percentage",
+            "excise_duty": "0.0",
+        }
+        if it.get("description"):
+            attrs["description"] = it["description"]
+        d = {
+            "type": "sales_invoice_details",
+            "attributes": attrs,
+        }
+        if it.get("product_id"):
+            d["relationships"] = {"product": {"data": {"id": str(it["product_id"]), "type": "products"}}}
+        details.append(d)
+
+    payload = {
+        "data": {
+            "type": "sales_invoices",
+            "attributes": {
+                "description": description,
+                "issue_date": issue_date,
+                "due_date": issue_date,
+                "currency": currency,
+                "exchange_rate": "1.0",
+                "withholding_rate": "0.0",
+                "vat_withholding_rate": "0.0",
+                "invoice_discount_type": "percentage",
+                "invoice_discount": "0.0",
+                "billing_address": billing_address or None,
+                "billing_phone": None,
+                "tax_number": tax_number,
+                "tax_office": tax_office or None,
+                "city": city or None,
+                "district": district or None,
+                "is_abroad": False,
+                "shipment_included": True,
+                "cash_sale": True,
+                "tag_list": [tag] if tag else [],
+            },
+            "relationships": {
+                "contact": {"data": {"id": str(contact_id), "type": "contacts"}},
+                "details": {"data": details},
+            }
+        }
+    }
+    return await _api_post("sales_invoices", payload)
+
+
 async def delete_invoice(invoice_id: str) -> bool:
     """Delete (cancel/void) a sales invoice from Paraşüt."""
     token = await _get_token()
