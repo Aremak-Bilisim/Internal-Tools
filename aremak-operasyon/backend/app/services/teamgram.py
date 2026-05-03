@@ -305,7 +305,8 @@ async def get_purchases(page: int = 1, pagesize: int = 50, party_id: Optional[in
     """Tedarikçi siparişleri listesi. party_id verilirse sadece o tedarikçinin siparişleri."""
     params = {"page": page, "pagesize": pagesize}
     if party_id:
-        params["fid_party"] = party_id
+        # TG doğru parametre adı 'ofid' (orders/purchases of an entity); 'fid_party' yok sayılıyordu
+        params["ofid"] = party_id
     return await _get(f"{DOMAIN}/Purchases/Index", params)
 
 
