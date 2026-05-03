@@ -24,6 +24,7 @@ router = APIRouter()
 BRAND_SUPPLIER_MAP: dict[str, tuple[int, str]] = {
     "Hikrobot": (28599315, "Hangzhou Hikrobot Intelligent Co., Ltd."),
     "Arducam": (28603911, "Arducam"),
+    "TIS": (28603908, "The Imaging Source"),
     # ileride eklenecekler: "Computar": (..., "..."), ...
 }
 

@@ -36,17 +36,25 @@ export default function PurchaseRequestsPage() {
   const loadProducts = async (search = '') => {
     setProductLoading(true)
     try {
-      const params = new URLSearchParams({ pagesize: 100 })
+      const params = new URLSearchParams({ pagesize: 50 })
       if (search) params.set('search', search)
       const r = await api.get(`/products?${params}`)
       setProducts(r.data?.items || [])
     } finally { setProductLoading(false) }
   }
 
+  // search input için debounced
+  const [productSearchTimer, setProductSearchTimer] = useState(null)
+  const onProductSearch = (q) => {
+    if (productSearchTimer) clearTimeout(productSearchTimer)
+    const t = setTimeout(() => loadProducts(q), 300)
+    setProductSearchTimer(t)
+  }
+
   const openAddModal = () => {
     addForm.resetFields()
     setAddOpen(true)
-    loadProducts()
+    loadProducts()  // ilk açılışta default 50 ürün
   }
 
   const submitAdd = async () => {
@@ -279,9 +287,11 @@ export default function PurchaseRequestsPage() {
           >
             <Select
               showSearch
-              placeholder="Ürün ara (marka, model, SKU)..."
+              placeholder="Ürün ara (en az 2 karakter — marka, model, SKU)..."
               loading={productLoading}
-              filterOption={(input, opt) => (opt?.label || '').toLowerCase().includes(input.toLowerCase())}
+              filterOption={false}            /* server-side search */
+              onSearch={onProductSearch}
+              notFoundContent={productLoading ? <Spin size="small" /> : null}
               options={products.map(p => ({
                 value: p.id,
                 label: `${p.brand || ''} ${p.prod_model || ''} (${p.sku || '-'}) — Stok: ${p.inventory ?? 0}`,
