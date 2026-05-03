@@ -303,8 +303,8 @@ export default function PurchaseOrderNewPage() {
       {/* Parse Sonrası */}
       {parsed && (
         <>
-          {/* Tedarikçi tespiti */}
-          {parsed.supplier !== 'Hikrobot' && (
+          {/* Tedarikçi tespiti — sadece PDF parse'tan geldiyse uyarı (talep listesinden gelende geçerli değil) */}
+          {!fromList && parsed.supplier !== 'Hikrobot' && (
             <Alert
               type="error"
               showIcon
@@ -450,7 +450,7 @@ export default function PurchaseOrderNewPage() {
               type="primary"
               icon={<SaveOutlined />}
               loading={submitting}
-              disabled={!allMatched || !poName.trim() || parsed.supplier !== 'Hikrobot'}
+              disabled={!allMatched || !poName.trim() || (!fromList && parsed.supplier !== 'Hikrobot')}
               onClick={handleSubmit}
             >
               TG'de Tedarikçi Siparişi Oluştur
