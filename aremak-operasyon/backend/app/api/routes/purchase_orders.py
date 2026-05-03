@@ -59,6 +59,7 @@ class PurchaseItemIn(BaseModel):
 
 class CreatePurchaseIn(BaseModel):
     supplier: str = "Hikrobot"
+    tg_supplier_id: Optional[int] = None  # set edilirse o tedarikciye baglar (yoksa supplier->Hikrobot fallback)
     name: str                   # Sipariş adı (örn. "Hikrobot Proforma A2603...")
     po_no: Optional[str] = None
     order_date: Optional[str] = None    # YYYY-MM-DD; boşsa bugün
@@ -66,6 +67,7 @@ class CreatePurchaseIn(BaseModel):
     billing_address: str = DEFAULT_DELIVERY_ADDRESS
     currency: str = "USD"
     items: list[PurchaseItemIn]
+    request_list_id: Optional[int] = None   # talep listesinden donusturuluyorsa, basarili olunca liste kapatilir
 
 
 # ─── Liste (TG'den) ──────────────────────────────────────────────────
@@ -442,9 +444,15 @@ async def create_purchase(
     if not data.items:
         raise HTTPException(400, "Ürün listesi boş")
 
-    # Hikrobot dışı tedarikçi şimdilik desteklenmiyor
-    if data.supplier.lower() != "hikrobot":
-        raise HTTPException(400, f"'{data.supplier}' tedarikçisi henüz desteklenmiyor")
+    # Tedarikci secimi: tg_supplier_id verilirse onu kullan, yoksa supplier='Hikrobot' fallback
+    if data.tg_supplier_id:
+        related_entity_id = data.tg_supplier_id
+        attn_id = SUN_ZHIPING_CONTACT_ID if data.tg_supplier_id == HIKROBOT_COMPANY_ID else None
+    elif data.supplier.lower() == "hikrobot":
+        related_entity_id = HIKROBOT_COMPANY_ID
+        attn_id = SUN_ZHIPING_CONTACT_ID
+    else:
+        raise HTTPException(400, f"'{data.supplier}' tedarikçisi için tg_supplier_id gerekli")
 
     # TG payload'unu hazırla
     order_date_str = (data.order_date or datetime.utcnow().strftime("%Y-%m-%d")) + "T00:00:00"
@@ -456,8 +464,8 @@ async def create_purchase(
         "CustomStageId": URETIM_BEKLENIYOR_STAGE_ID,
         "VatType": 1,                                # KDV Hariç
         "CurrencyName": data.currency,
-        "RelatedEntityId": HIKROBOT_COMPANY_ID,
-        "AttnId": SUN_ZHIPING_CONTACT_ID,
+        "RelatedEntityId": related_entity_id,
+        **({"AttnId": attn_id} if attn_id else {}),
         "DeliveryAddress": data.delivery_address,
         "BillingAddress": data.billing_address,
         "Description": f"PO No: {data.po_no}" if data.po_no else None,
@@ -486,6 +494,24 @@ async def create_purchase(
         raise HTTPException(502, f"TeamGram hatası: {result.get('Message') or result}")
 
     purchase_id = result.get("Id") or result.get("PurchaseId")
+
+    # Talep listesinden donusturuluyorsa kapat
+    if data.request_list_id and purchase_id:
+        try:
+            from app.models.purchase_request import PurchaseRequestList
+            from app.core.database import SessionLocal
+            from datetime import datetime as _dt
+            with SessionLocal() as _db:
+                lst = _db.query(PurchaseRequestList).filter(PurchaseRequestList.id == data.request_list_id).first()
+                if lst and lst.status == "open":
+                    lst.status = "closed"
+                    lst.linked_tg_purchase_id = int(purchase_id)
+                    lst.closed_by_id = user.id
+                    lst.closed_at = _dt.utcnow()
+                    _db.commit()
+        except Exception as e:
+            logger.warning(f"Talep listesi kapatilirken hata (sipariş yine de oluştu): {e}")
+
     return {
         "ok": True,
         "tg_purchase_id": purchase_id,

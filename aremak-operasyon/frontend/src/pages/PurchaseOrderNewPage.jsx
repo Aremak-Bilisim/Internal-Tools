@@ -1,10 +1,10 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Card, Upload, Button, Typography, Space, Spin, message, Table, Tag, Input, InputNumber,
   Descriptions, Select, Form, Modal, Alert, DatePicker,
 } from 'antd'
 import { InboxOutlined, FilePdfOutlined, CheckCircleOutlined, CloseCircleOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import api from '../services/api'
 
@@ -13,6 +13,9 @@ const { Dragger } = Upload
 
 export default function PurchaseOrderNewPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const fromListId = searchParams.get('from_list')
+  const [fromList, setFromList] = useState(null)  // backend'den çekilen liste objesi
   const [parsing, setParsing] = useState(false)
   const [parsed, setParsed] = useState(null)   // { supplier, po_no, items, total_*, currency }
   const [items, setItems] = useState([])       // editable items with `match`
@@ -27,6 +30,37 @@ export default function PurchaseOrderNewPage() {
   const [searchQ, setSearchQ] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
+
+  // Talep listesinden başlat: ?from_list=N varsa liste'yi çek + items'ı yerleştir
+  useEffect(() => {
+    if (!fromListId) return
+    api.get('/purchase-requests/lists').then(r => {
+      const lst = (r.data?.lists || []).find(l => String(l.id) === String(fromListId))
+      if (!lst) {
+        message.error('Talep listesi bulunamadı veya kapanmış')
+        return
+      }
+      setFromList(lst)
+      const popItems = (lst.items || []).map(it => ({
+        product_name: `${it.brand || ''} ${it.model || ''}`.trim(),
+        match: { id: it.product_id, tg_id: it.product_tg_id, displayname: `${it.brand || ''} ${it.model || ''}`.trim(), sku: it.sku },
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        description: `${it.brand || ''} ${it.model || ''}`.trim(),
+      }))
+      setItems(popItems)
+      setParsed({
+        supplier: lst.supplier_name,
+        tg_supplier_id: lst.tg_supplier_id,
+        po_no: null,
+        currency: popItems[0]?.unit_price ? (lst.items[0]?.currency || 'USD') : 'USD',
+        order_date: dayjs().format('YYYY-MM-DD'),
+      })
+      setPoName(`${lst.supplier_name || 'Tedarikçi'} - Talep Listesi #${lst.id}`)
+      setOrderDate(dayjs())
+      message.info(`Liste #${lst.id}'den ${popItems.length} kalem yüklendi`)
+    }).catch(() => message.error('Liste yüklenemedi'))
+  }, [fromListId])
 
   const beforeUpload = async (file) => {
     setParsing(true)
@@ -113,6 +147,8 @@ export default function PurchaseOrderNewPage() {
     try {
       const payload = {
         supplier: parsed.supplier || 'Hikrobot',
+        tg_supplier_id: parsed.tg_supplier_id || null,
+        request_list_id: fromListId ? Number(fromListId) : null,
         name: poName,
         po_no: parsed.po_no || null,
         order_date: orderDate ? orderDate.format('YYYY-MM-DD') : null,
@@ -237,8 +273,17 @@ export default function PurchaseOrderNewPage() {
       <Title level={4}>Tedarikçi Siparişi Oluştur</Title>
       <Text type="secondary">Hikrobot Proforma Invoice PDF'ini yükleyin. Sistem ürünleri eşleştirsin.</Text>
 
-      {/* Upload */}
-      {!parsed && (
+      {fromList && (
+        <Alert
+          type="info" showIcon
+          style={{ marginTop: 12 }}
+          message={`Talep Listesi #${fromList.id} (${fromList.supplier_name}) — ${fromList.items?.length || 0} kalem yüklendi`}
+          description="Sipariş oluşturulduğunda bu liste otomatik olarak kapanır ve yaratılan TG siparişiyle eşleştirilir."
+        />
+      )}
+
+      {/* Upload (talep listesinden geldiyse PDF opsiyonel) */}
+      {!parsed && !fromList && (
         <Card style={{ marginTop: 16 }}>
           <Spin spinning={parsing} tip="PDF parse ediliyor...">
             <Dragger

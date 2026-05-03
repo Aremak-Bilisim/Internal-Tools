@@ -3,12 +3,14 @@ import {
   Card, Table, Tag, Button, Typography, Space, Modal, Form, Input, InputNumber,
   Select, message, Popconfirm, Divider, Tooltip, Spin,
 } from 'antd'
-import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined, ShoppingCartOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
 const { Title, Text } = Typography
 
 export default function PurchaseRequestsPage() {
+  const navigate = useNavigate()
   const [lists, setLists] = useState([])
   const [loading, setLoading] = useState(false)
   const [autoFilling, setAutoFilling] = useState(false)
@@ -224,6 +226,13 @@ export default function PurchaseRequestsPage() {
                   {Number(lst.total_value || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                   {' '}{enriched[0]?.currency || ''}
                 </Text>
+                <Button
+                  type="primary" size="small" icon={<ShoppingCartOutlined />}
+                  disabled={(lst.items?.length || 0) === 0}
+                  onClick={() => navigate(`/purchase-orders/new?from_list=${lst.id}`)}
+                >
+                  Siparişe Dönüştür
+                </Button>
               </Space>
             }
             style={{ marginBottom: 16 }}
