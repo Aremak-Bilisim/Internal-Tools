@@ -217,6 +217,7 @@ class AddItemBody(BaseModel):
     # Manuel tedarikçi override (brand mapping yerine)
     tg_supplier_id: Optional[int] = None
     supplier_name: Optional[str] = None
+    save_as_default: bool = False   # bu tedarikçiyi ürünün varsayılanı olarak kaydet
 
 
 @router.post("/items")
@@ -229,10 +230,17 @@ def add_item(
     p = db.query(Product).filter(Product.id == body.product_id).first()
     if not p:
         raise HTTPException(404, "Ürün bulunamadı")
-    # Tedarikçi seçimi: body'de override varsa onu kullan, yoksa brand mapping
+    # Tedarikçi seçimi: body override > ürünün default_supplier > brand mapping
     if body.tg_supplier_id:
         sup_id = body.tg_supplier_id
         sup_name = body.supplier_name or "Tedarikçi"
+        if body.save_as_default:
+            p.default_supplier_tg_id = sup_id
+            p.default_supplier_name = sup_name
+            db.flush()
+    elif p.default_supplier_tg_id:
+        sup_id = p.default_supplier_tg_id
+        sup_name = p.default_supplier_name or "Tedarikçi"
     else:
         sup = _supplier_for_brand(p.brand)
         if not sup:
@@ -388,11 +396,16 @@ async def auto_fill_critical_stock(
             skipped_below_threshold += 1
             continue
 
-        sup = _supplier_for_brand(p.brand)
-        if not sup:
-            skipped_no_supplier += 1
-            continue
-        sup_id, sup_name = sup
+        # Önce ürünün varsayılan tedarikçisi, yoksa brand mapping
+        if p.default_supplier_tg_id:
+            sup_id = p.default_supplier_tg_id
+            sup_name = p.default_supplier_name or "Tedarikçi"
+        else:
+            sup = _supplier_for_brand(p.brand)
+            if not sup:
+                skipped_no_supplier += 1
+                continue
+            sup_id, sup_name = sup
         lst = _ensure_open_list(db, sup_id, sup_name, current_user.id)
 
         # idempotent: bu ürün açık listede zaten varsa atla (adet güncelleme yok)

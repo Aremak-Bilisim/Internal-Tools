@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   Card, Table, Tag, Button, Typography, Space, Modal, Form, Input, InputNumber,
-  Select, message, Popconfirm, Divider, Tooltip, Spin,
+  Select, message, Popconfirm, Divider, Tooltip, Spin, Checkbox,
 } from 'antd'
 import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined, ShoppingCartOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -110,6 +110,7 @@ export default function PurchaseRequestsPage() {
         payload.tg_supplier_id = v._supplier_id
         const sel = supplierOptions.find(s => s.value === v._supplier_id)
         payload.supplier_name = sel?.name || v._supplier_name || null
+        payload.save_as_default = !!v._save_as_default
       }
       const r = await api.post('/purchase-requests/items', payload)
       if (r.data?.merged) message.success('Mevcut kaleme eklendi (adet birleşti)')
@@ -350,7 +351,7 @@ export default function PurchaseRequestsPage() {
           </Form.Item>
 
           <Form.Item
-            label="Tedarikçi (opsiyonel — boş bırakılırsa ürünün markasından otomatik)"
+            label="Tedarikçi (opsiyonel — boş bırakılırsa ürünün varsayılanı veya markasından otomatik)"
             extra={<Button size="small" type="link" onClick={() => setSupplierCreateOpen(true)}>+ Yeni Tedarikçi Yarat</Button>}
           >
             <Form.Item name="_supplier_id" noStyle>
@@ -364,6 +365,9 @@ export default function PurchaseRequestsPage() {
                 options={supplierOptions}
               />
             </Form.Item>
+          </Form.Item>
+          <Form.Item name="_save_as_default" valuePropName="checked" style={{ marginTop: -8 }}>
+            <Checkbox>Bu tedarikçiyi ürünün varsayılanı olarak kaydet (sonraki auto-fill'lerde kullanılır)</Checkbox>
           </Form.Item>
           <Form.Item name="quantity" label="Adet" rules={[{ required: true, message: 'Adet girin' }]}>
             <InputNumber min={1} style={{ width: '100%' }} />

@@ -53,6 +53,12 @@ def _run_migrations():
             if "created_by_id" not in prod_cols:
                 conn.execute(text("ALTER TABLE products ADD COLUMN created_by_id INTEGER REFERENCES users(id)"))
                 conn.commit()
+            if "default_supplier_tg_id" not in prod_cols:
+                conn.execute(text("ALTER TABLE products ADD COLUMN default_supplier_tg_id INTEGER"))
+                conn.commit()
+            if "default_supplier_name" not in prod_cols:
+                conn.execute(text("ALTER TABLE products ADD COLUMN default_supplier_name VARCHAR"))
+                conn.commit()
         except Exception:
             pass
         # hepsiburada_orders ek kolonlar (Asama 1 onay icin)

@@ -1110,6 +1110,16 @@ export default function ProductsPage() {
                   return q > 0 ? <Tag color="blue">{q}</Tag> : <Text type="secondary">-</Text>
                 })()}
               </Descriptions.Item>
+              <Descriptions.Item label="Varsayılan Tedarikçi" span={2}>
+                {detailRecord.default_supplier_name
+                  ? <Tag color="purple">{detailRecord.default_supplier_name}</Tag>
+                  : <Text type="secondary">-</Text>}
+                {detailRecord.default_supplier_tg_id && (
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                    (TG #{detailRecord.default_supplier_tg_id})
+                  </Text>
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="KDV">{detailRecord.vat != null ? `%${detailRecord.vat}` : '-'}</Descriptions.Item>
               <Descriptions.Item label="Birim">{detailRecord.unit || '-'}</Descriptions.Item>
               <Descriptions.Item label="Stok">

@@ -40,6 +40,10 @@ class Product(Base):
     datasheet_url = Column(String, nullable=True)           # TG CustomFieldId 193440 (Datasheet)
     shelf = Column(String, nullable=True, index=True)       # TG CustomFieldId 193563 (Raf)
 
+    # Talep listesi auto-fill için varsayılan tedarikçi (yoksa brand mapping kullanılır)
+    default_supplier_tg_id = Column(Integer, nullable=True, index=True)
+    default_supplier_name = Column(String, nullable=True)
+
     # Onay akışı (sales/warehouse ürün ekleyince admin onayı bekler)
     pending_approval = Column(Boolean, default=False, index=True)
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

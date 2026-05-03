@@ -59,6 +59,8 @@ def _to_dict(p: Product) -> dict:
         "pending_approval": bool(p.pending_approval),
         "created_by_id": p.created_by_id,
         "created_by_name": creator_name,
+        "default_supplier_tg_id": p.default_supplier_tg_id,
+        "default_supplier_name": p.default_supplier_name,
     }
 
 
@@ -118,6 +120,29 @@ async def get_brands(
 
 
 # ── CATEGORIES ────────────────────────────────────────────────────────────────
+
+class DefaultSupplierBody(BaseModel):
+    tg_supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+
+
+@router.put("/{product_id}/default-supplier")
+def set_default_supplier(
+    product_id: int,
+    body: DefaultSupplierBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """Ürünün talep listesi auto-fill için varsayılan tedarikçisini set eder.
+    null gönderilirse temizler (brand mapping fallback'e döner)."""
+    p = db.query(Product).filter(Product.id == product_id).first()
+    if not p:
+        raise HTTPException(404, "Ürün bulunamadı")
+    p.default_supplier_tg_id = body.tg_supplier_id
+    p.default_supplier_name = body.supplier_name
+    db.commit()
+    return {"ok": True, "default_supplier_tg_id": p.default_supplier_tg_id, "default_supplier_name": p.default_supplier_name}
+
 
 @router.get("/incoming-summary")
 async def incoming_purchase_summary(current_user=Depends(get_current_user)):
