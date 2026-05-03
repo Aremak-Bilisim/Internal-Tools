@@ -55,6 +55,20 @@ def _run_migrations():
                 conn.commit()
         except Exception:
             pass
+        # hepsiburada_orders ek kolonlar (Asama 1 onay icin)
+        try:
+            hb_cols = {c["name"] for c in insp.get_columns("hepsiburada_orders")}
+            if "parasut_invoice_id" not in hb_cols:
+                conn.execute(text("ALTER TABLE hepsiburada_orders ADD COLUMN parasut_invoice_id VARCHAR"))
+                conn.commit()
+            if "package_number" not in hb_cols:
+                conn.execute(text("ALTER TABLE hepsiburada_orders ADD COLUMN package_number VARCHAR"))
+                conn.commit()
+            if "approved_by_id" not in hb_cols:
+                conn.execute(text("ALTER TABLE hepsiburada_orders ADD COLUMN approved_by_id INTEGER"))
+                conn.commit()
+        except Exception:
+            pass
 
 _run_migrations()
 

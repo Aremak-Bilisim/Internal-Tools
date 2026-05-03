@@ -11,6 +11,7 @@ Akış:
 """
 from typing import Optional
 import httpx
+import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -23,6 +24,8 @@ from app.models.product import Product
 from app.models.shipment import ShipmentRequest, ShipmentHistory
 from app.models.user import User
 from app.models.notification import Notification
+from app.models.hepsiburada_order import HepsiburadaOrder
+from app.services import hepsiburada as hb_api
 from app.services import parasut, teamgram
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,197 @@ router = APIRouter()
 HEPSIBURADA_CHANNEL_ID = 199659
 KAZANILDI_CUSTOM_STAGE_ID = 196777   # Inbound pipeline > Teklif Onay (28615009 örneği)
 HEPSIBURADA_TAG = "Hepsiburada"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 0. Webhook'tan gelen pending HB siparişleri (Aşama 1 — Admin/Sales onayı)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/pending-orders")
+def list_pending_hb_orders(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """Webhook'tan CreateOrder olarak gelmiş, henüz onaylanmamış siparişler."""
+    rows = (db.query(HepsiburadaOrder)
+            .filter(HepsiburadaOrder.event_type == "CreateOrder",
+                    HepsiburadaOrder.parasut_invoice_id.is_(None))
+            .order_by(HepsiburadaOrder.received_at.desc())
+            .limit(50).all())
+    out = []
+    for r in rows:
+        try:
+            payload = json.loads(r.raw_payload or "{}")
+        except Exception:
+            payload = {}
+        items_summary = []
+        for it in (payload.get("items") or []):
+            items_summary.append({
+                "orderNumber": it.get("orderNumber"),
+                "sku": it.get("sku") or it.get("merchantSku"),
+                "quantity": it.get("quantity"),
+                "customerName": it.get("customerName"),
+                "totalPrice": (it.get("totalPrice") or {}).get("amount"),
+                "currency": (it.get("totalPrice") or {}).get("currency"),
+            })
+        out.append({
+            "id": r.id,
+            "external_order_id": r.external_order_id,
+            "order_number": r.order_number,
+            "received_at": r.received_at.isoformat() if r.received_at else None,
+            "items": items_summary,
+        })
+    return {"count": len(out), "orders": out}
+
+
+@router.post("/approve/{hb_order_id}")
+async def approve_hb_order(
+    hb_order_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """Aşama 1: Admin/Sales onayı.
+      1) HB'den siparişin fresh detayını çek (validation)
+      2) Paraşüt'te müşteri (yoksa) + e-arşiv fatura yarat
+      3) HB'de paket oluştur (lineItem id ile)
+      4) Kayıtla işaretle, sevk sorumlusu (warehouse) bildirim
+    """
+    hb_rec = db.query(HepsiburadaOrder).filter(HepsiburadaOrder.id == hb_order_id).first()
+    if not hb_rec:
+        raise HTTPException(404, "Hepsiburada kaydı bulunamadı")
+    if hb_rec.parasut_invoice_id:
+        raise HTTPException(400, f"Bu sipariş zaten onaylanmış (Paraşüt fatura: {hb_rec.parasut_invoice_id})")
+
+    try:
+        payload = json.loads(hb_rec.raw_payload or "{}")
+    except Exception:
+        raise HTTPException(400, "Webhook payload parse edilemedi")
+    items = payload.get("items") or []
+    if not items:
+        raise HTTPException(400, "Webhook payload'unda items[] yok")
+
+    # Çoklu kalem siparişlerinde tek fatura — items[0]'dan customer/invoice info al
+    first = items[0]
+    inv_block = first.get("invoice") or {}
+    addr_block = inv_block.get("address") or {}
+    customer_name = inv_block.get("name") or addr_block.get("name") or first.get("customerName") or "Hepsiburada Müşterisi"
+    tax_no = (inv_block.get("taxNumber") or inv_block.get("turkishIdentityNumber") or "11111111111").strip()
+    tax_office = inv_block.get("taxOffice") or ""
+    email = addr_block.get("email") or ""
+    phone = addr_block.get("phoneNumber") or addr_block.get("alternatePhoneNumber") or ""
+    address = addr_block.get("address") or ""
+    city = addr_block.get("city") or ""
+    district = addr_block.get("town") or addr_block.get("district") or ""
+    order_number = first.get("orderNumber") or hb_rec.order_number
+    today = first.get("orderDate") or _today_iso()
+    if "T" in today:
+        today = today.split("T")[0]
+
+    # 1) HB'den fresh detay (opsiyonel — yoksa devam et, hata loglanır)
+    try:
+        await hb_api.get_order(order_number)
+    except Exception as e:
+        logger.warning(f"HB get_order({order_number}) hatası, devam ediliyor: {e}")
+
+    # 2) Paraşüt cari + fatura
+    # SKU eşleşmesi: HB items[].sku veya merchantSku → lokal Product.sku → Product.parasut_id
+    pa_items = []
+    unmatched = []
+    for it in items:
+        sku = (it.get("sku") or it.get("merchantSku") or "").strip()
+        prod = None
+        if sku:
+            prod = (db.query(Product)
+                    .filter((Product.sku == sku))
+                    .first())
+        # Paraşüt product_id zorunlu değil ama tercih edilir
+        parasut_pid = prod.parasut_id if (prod and prod.parasut_id) else None
+        unit = (it.get("unitPrice") or {}).get("amount") or it.get("unitPrice")
+        qty = it.get("quantity") or 1
+        pa_items.append({
+            "product_id": parasut_pid,
+            "quantity": qty,
+            "unit_price": unit,
+            "vat_rate": it.get("vatRate") or 20,
+            "description": prod.prod_model if prod else (it.get("productName") or sku or "Hepsiburada ürünü"),
+        })
+        if not parasut_pid:
+            unmatched.append(sku or "?")
+
+    if unmatched:
+        # Paraşüt fatura için product_id zorunlu değil — uyarı bırak ama devam et
+        logger.warning(f"HB approve: Paraşüt'te eşleşmemiş SKU'lar (description ile gidecek): {unmatched}")
+
+    try:
+        contact_id = await parasut.create_or_get_contact(
+            name=customer_name, tax_number=tax_no, tax_office=tax_office,
+            email=email, phone=phone, address=address, city=city, district=district,
+            contact_type="person", account_type="customer",
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Paraşüt cari oluşturma hatası: {e}")
+
+    description = f"Hepsiburada - {order_number}"
+    try:
+        inv_res = await parasut.create_sales_invoice_for_hepsiburada(
+            contact_id=contact_id, description=description,
+            items=pa_items, issue_date=today,
+            billing_address=address, city=city, district=district,
+            tax_number=tax_no, tax_office=tax_office, currency="TRL",
+            tag="Hepsiburada",
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Paraşüt fatura oluşturma hatası: {e}")
+    parasut_invoice_id = inv_res.get("data", {}).get("id")
+    if not parasut_invoice_id:
+        raise HTTPException(502, f"Paraşüt fatura yanıtı beklenmiyor: {inv_res}")
+
+    # 3) HB'de paket oluştur
+    line_item_ids = [str(it.get("id")) for it in items if it.get("id")]
+    package_number = None
+    try:
+        if line_item_ids:
+            pkg_res = await hb_api.create_package(line_item_ids)
+            # HB response'undan paket numarası — schema doğrulanacak
+            if isinstance(pkg_res, list) and pkg_res:
+                package_number = pkg_res[0].get("packageNumber") or pkg_res[0].get("PackageNumber")
+            elif isinstance(pkg_res, dict):
+                package_number = pkg_res.get("packageNumber") or pkg_res.get("PackageNumber")
+    except Exception as e:
+        # Paket oluşturma kritik değil — fatura zaten oluştu; admin manuel paketleyebilir
+        logger.error(f"HB create_package hatası ({line_item_ids}): {e}")
+
+    # 4) Kayıt + bildirim
+    from datetime import datetime as _dt
+    hb_rec.parasut_invoice_id = str(parasut_invoice_id)
+    hb_rec.package_number = package_number
+    hb_rec.approved_by_id = current_user.id
+    hb_rec.processed = True
+    hb_rec.processed_at = _dt.utcnow()
+    db.commit()
+
+    # Sevk sorumlusu + admin'e bildirim
+    warehouses = db.query(User).filter(User.role == "warehouse", User.is_active == True).all()
+    admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+    msg = (f"Hepsiburada {order_number} — Paraşüt fatura yaratıldı. "
+           f"Sevkiyatlar > 'Hepsiburada Sevki Oluştur' ile devam edebilirsiniz.")
+    for u in warehouses + admins:
+        db.add(Notification(user_id=u.id, title=f"HB Onaylandı: {order_number}", message=msg))
+    db.commit()
+
+    return {
+        "ok": True,
+        "hb_order_id": hb_rec.id,
+        "parasut_invoice_id": parasut_invoice_id,
+        "package_number": package_number,
+        "unmatched_skus": unmatched,
+    }
+
+
+def _today_iso():
+    from datetime import datetime as _dt
+    return _dt.utcnow().strftime("%Y-%m-%d")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

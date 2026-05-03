@@ -19,6 +19,9 @@ class HepsiburadaOrder(Base):
     tg_opportunity_id = Column(Integer, nullable=True, index=True)        # TG'de yaratılan fırsat ID
     processed = Column(Boolean, default=False)                            # TG'de fırsat yaratıldı mı?
     error = Column(Text, nullable=True)                                   # İşlem hatası varsa
+    parasut_invoice_id = Column(String, nullable=True, index=True)        # Asama 1 onayinda olusan Parasut faturasi
+    package_number = Column(String, nullable=True, index=True)            # HB packaging API'sinden donen paket no
+    approved_by_id = Column(Integer, nullable=True)                       # Asama 1'i onaylayan kullanici (User.id)
     received_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True), nullable=True)
 
