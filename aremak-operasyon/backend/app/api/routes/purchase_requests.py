@@ -99,16 +99,41 @@ def _list_to_dict(lst: PurchaseRequestList, products_incoming: dict[int, float])
 # ── Tedarikçi (TG party) yardımcı endpoint'leri ───────────────────────────────
 
 @router.get("/suppliers/search")
-async def search_suppliers(q: str = Query(""), current_user=Depends(require_role("admin", "sales"))):
-    """TG'de şirket arama (manuel tedarikçi seçimi için).
-    Önce BRAND_SUPPLIER_MAP'te ada göre filtrele, sonra TG QuickSearch."""
+async def search_suppliers(
+    q: str = Query(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """Tedarikçi arama. Birleşik kaynak:
+      1) BRAND_SUPPLIER_MAP (Hikrobot, Arducam, TIS...)
+      2) Lokal'de daha önce kullanılmış (purchase_request_lists distinct)
+      3) Lokal'de ürünlerin default_supplier_tg_id'leri (Product distinct)
+      4) TG QuickSearch (q >= 2)"""
     out = []
     qn = (q or "").strip().lower()
-    # 1. Yerel mapping'te eşleşenler
+    # 1. Yerel mapping
     for brand, (sid, sname) in BRAND_SUPPLIER_MAP.items():
         if not qn or qn in sname.lower() or qn in brand.lower():
             out.append({"id": sid, "name": sname, "brand_hint": brand, "source": "mapping"})
-    # 2. TG QuickSearch (en az 2 char)
+    # 2. Lokal listelerde kullanılmış supplier'lar
+    rows = (db.query(PurchaseRequestList.tg_supplier_id, PurchaseRequestList.supplier_name)
+            .filter(PurchaseRequestList.tg_supplier_id.isnot(None))
+            .distinct().all())
+    for sid, sname in rows:
+        if not sid or any(o["id"] == sid for o in out):
+            continue
+        if not qn or (sname and qn in sname.lower()):
+            out.append({"id": sid, "name": sname or "Tedarikçi", "source": "history"})
+    # 3. Ürünlere set edilmiş default supplier'lar
+    rows2 = (db.query(Product.default_supplier_tg_id, Product.default_supplier_name)
+             .filter(Product.default_supplier_tg_id.isnot(None))
+             .distinct().all())
+    for sid, sname in rows2:
+        if not sid or any(o["id"] == sid for o in out):
+            continue
+        if not qn or (sname and qn in sname.lower()):
+            out.append({"id": sid, "name": sname or "Tedarikçi", "source": "product_default"})
+    # 4. TG QuickSearch (q >= 2)
     if len(qn) >= 2:
         try:
             data = await teamgram._get(f"aremak/Search/QuickSearch", {"query": q, "getcompany": True})
@@ -120,7 +145,7 @@ async def search_suppliers(q: str = Query(""), current_user=Depends(require_role
                         out.append({"id": cid, "name": x.get("name") or "", "source": "tg"})
         except Exception as e:
             logger.warning(f"TG company search hatası: {e}")
-    return {"suppliers": out[:30]}
+    return {"suppliers": out[:50]}
 
 
 class CreateSupplierBody(BaseModel):

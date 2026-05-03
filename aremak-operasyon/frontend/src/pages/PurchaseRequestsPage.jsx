@@ -372,14 +372,32 @@ export default function PurchaseRequestsPage() {
               loading={productLoading}
               filterOption={false}
               onSearch={onProductSearch}
-              onChange={(pid) => {
+              onChange={async (pid) => {
                 const p = products.find(x => x.id === pid)
-                if (p) {
-                  // Para birimi ve fiyatı ürünün varsayılanından doldur (kullanıcı override edebilir)
-                  addForm.setFieldsValue({
-                    currency: p.purchase_currency_name || addForm.getFieldValue('currency') || 'USD',
-                    unit_price: addForm.getFieldValue('unit_price') ?? p.purchase_price ?? null,
-                  })
+                if (!p) return
+                // Para birimi + alış fiyatı varsayılan
+                addForm.setFieldsValue({
+                  currency: p.purchase_currency_name || addForm.getFieldValue('currency') || 'USD',
+                  unit_price: addForm.getFieldValue('unit_price') ?? p.purchase_price ?? null,
+                })
+                // Tedarikçi default seçimi
+                let chosen = null
+                if (p.default_supplier_tg_id) {
+                  chosen = { id: p.default_supplier_tg_id, name: p.default_supplier_name || 'Tedarikçi' }
+                } else if (p.brand) {
+                  // Brand ile arama yap, mapping'teki ilk eşleşeni al
+                  try {
+                    const sr = await api.get(`/purchase-requests/suppliers/search?q=${encodeURIComponent(p.brand)}`)
+                    const list = sr.data?.suppliers || []
+                    const match = list.find(s => s.brand_hint === p.brand) || list[0]
+                    if (match) chosen = { id: match.id, name: match.name }
+                  } catch {}
+                }
+                if (chosen) {
+                  addForm.setFieldValue('_supplier_id', chosen.id)
+                  setSupplierOptions(prev => prev.some(o => o.value === chosen.id)
+                    ? prev
+                    : [{ value: chosen.id, label: chosen.name, name: chosen.name }, ...prev])
                 }
               }}
               notFoundContent={productLoading ? <Spin size="small" /> : null}
