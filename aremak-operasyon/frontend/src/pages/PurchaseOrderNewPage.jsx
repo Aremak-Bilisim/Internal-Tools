@@ -282,7 +282,7 @@ export default function PurchaseOrderNewPage() {
         />
       )}
 
-      {/* Upload (talep listesinden geldiyse PDF opsiyonel) */}
+      {/* Upload — Hikrobot PDF parse akışı */}
       {!parsed && !fromList && (
         <Card style={{ marginTop: 16 }}>
           <Spin spinning={parsing} tip="PDF parse ediliyor...">
@@ -297,6 +297,24 @@ export default function PurchaseOrderNewPage() {
               <p className="ant-upload-hint">Sadece Hikrobot Proforma Invoice destekleniyor</p>
             </Dragger>
           </Spin>
+        </Card>
+      )}
+
+      {/* Talep listesi akışında PDF opsiyonel — sadece doküman olarak yüklenir, parse edilmez */}
+      {fromList && (
+        <Card size="small" style={{ marginTop: 12 }} title="Proforma / Sipariş PDF (opsiyonel)">
+          <Upload
+            beforeUpload={(file) => { setPdfFile(file); message.success(`${file.name} eklendi (sipariş yaratılınca yüklenecek)`); return false }}
+            onRemove={() => setPdfFile(null)}
+            maxCount={1}
+            accept=".pdf"
+            fileList={pdfFile ? [{ uid: '1', name: pdfFile.name, status: 'done' }] : []}
+          >
+            <Button icon={<FilePdfOutlined />}>PDF Seç</Button>
+            <Text type="secondary" style={{ marginLeft: 12, fontSize: 12 }}>
+              Opsiyonel — varsa sipariş yaratıldıktan sonra TG'ye doküman olarak eklenir.
+            </Text>
+          </Upload>
         </Card>
       )}
 
