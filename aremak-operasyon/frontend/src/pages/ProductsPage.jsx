@@ -5,7 +5,7 @@ import {
   Popconfirm, message, Switch, Descriptions, Empty, AutoComplete,
 } from 'antd'
 import {
-  SearchOutlined, PlusOutlined, ReloadOutlined, EditOutlined,
+  SearchOutlined, PlusOutlined, ReloadOutlined, EditOutlined, CopyOutlined,
   BoxPlotOutlined, LinkOutlined, CheckCircleOutlined, QuestionCircleOutlined,
   DeleteOutlined, FilePdfOutlined,
 } from '@ant-design/icons'
@@ -240,6 +240,31 @@ export default function ProductsPage() {
     createForm.resetFields()
     createForm.setFieldsValue({ currency_name: 'TL', purchase_currency_name: 'TL', vat: 20, unit: 'adet', no_inventory: false, not_available: false })
     setSelectedParentCat(null)
+    setSkuHint(null)
+    setCreateOpen(true)
+  }
+
+  const openCloneFrom = (src) => {
+    if (!src) return
+    setDetailOpen(false)
+    createForm.resetFields()
+    createForm.setFieldsValue({
+      brand: src.brand,
+      prod_model: src.prod_model,
+      sku: src.sku ? `${src.sku}-KOPYA` : '',  // unique için suffix; user düzenleyebilir
+      price: src.price,
+      currency_name: src.currency_name || 'TL',
+      purchase_price: src.purchase_price,
+      purchase_currency_name: src.purchase_currency_name || 'TL',
+      category_id: src.category_id || null,
+      unit: src.unit || 'adet',
+      vat: src.vat ?? 20,
+      no_inventory: src.no_inventory || false,
+      critical_inventory: src.critical_inventory || 0,
+      details: src.details,
+      not_available: false,
+    })
+    setSelectedParentCat(src.parent_category_id || null)
     setSkuHint(null)
     setCreateOpen(true)
   }
@@ -1042,9 +1067,18 @@ export default function ProductsPage() {
         onClose={() => setDetailOpen(false)}
         width={500}
         extra={
-          <Button icon={<EditOutlined />} onClick={() => { setDetailOpen(false); openEdit(detailRecord) }}>
-            Düzenle
-          </Button>
+          <Space>
+            {isAdmin && (
+              <Tooltip title="Bu ürünün bilgilerinden yeni bir ürün oluştur">
+                <Button icon={<CopyOutlined />} onClick={() => openCloneFrom(detailRecord)}>
+                  Kopyasını Oluştur
+                </Button>
+              </Tooltip>
+            )}
+            <Button icon={<EditOutlined />} onClick={() => { setDetailOpen(false); openEdit(detailRecord) }}>
+              Düzenle
+            </Button>
+          </Space>
         }
       >
         {detailRecord && (
