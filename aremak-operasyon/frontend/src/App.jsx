@@ -19,6 +19,7 @@ import PurchaseOrderNewPage from './pages/PurchaseOrderNewPage'
 import PurchaseOrdersListPage from './pages/PurchaseOrdersListPage'
 import PurchaseOrderDetailPage from './pages/PurchaseOrderDetailPage'
 import PurchaseOrderArchiveDetailPage from './pages/PurchaseOrderArchiveDetailPage'
+import PurchaseRequestsPage from './pages/PurchaseRequestsPage'
 
 function PrivateRoute({ children }) {
   const token = useAuthStore((s) => s.token)
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="customer-query" element={<CustomerQueryPage />} />
         <Route path="customer-new" element={<CustomerNewPage />} />
         <Route path="customer-edit" element={<CustomerEditPage />} />
+        <Route path="purchase-requests" element={<PurchaseRequestsPage />} />
         <Route path="purchase-orders" element={<PurchaseOrdersListPage />} />
         <Route path="purchase-orders/new" element={<PurchaseOrderNewPage />} />
         <Route path="purchase-orders/archive/:id" element={<PurchaseOrderArchiveDetailPage />} />

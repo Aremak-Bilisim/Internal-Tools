@@ -23,7 +23,8 @@ router = APIRouter()
 # Brand → Supplier (TG party id, name) hardcoded mapping (1.B kararı)
 BRAND_SUPPLIER_MAP: dict[str, tuple[int, str]] = {
     "Hikrobot": (28599315, "Hangzhou Hikrobot Intelligent Co., Ltd."),
-    # ileride eklenecekler: "Computar": (..., "..."), "Arducam": (..., "..."), ...
+    "Arducam": (28603911, "Arducam"),
+    # ileride eklenecekler: "Computar": (..., "..."), ...
 }
 
 
