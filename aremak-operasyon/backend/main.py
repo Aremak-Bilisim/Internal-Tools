@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 
 # Tüm modelleri yükle (create_all için)
-from app.models import user, shipment, notification, teamgram_company, product, sample, purchase_match, purchase_document, purchase_receipt_document, archive_purchase, hepsiburada_order, archive_shipment  # noqa
+from app.models import user, shipment, notification, teamgram_company, product, sample, purchase_match, purchase_document, purchase_receipt_document, archive_purchase, hepsiburada_order, archive_shipment, purchase_request  # noqa
 Base.metadata.create_all(bind=engine)
 
 # Column-level migrations for existing tables

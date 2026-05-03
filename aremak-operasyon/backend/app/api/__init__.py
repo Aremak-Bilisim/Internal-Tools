@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import auth, products, orders, shipments, users, webhook, parasut, tcmb, notifications, query, samples, purchase_orders, webhooks_hepsiburada, hepsiburada
+from app.api.routes import auth, products, orders, shipments, users, webhook, parasut, tcmb, notifications, query, samples, purchase_orders, webhooks_hepsiburada, hepsiburada, purchase_requests
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -16,3 +16,4 @@ api_router.include_router(query.router, prefix="/query", tags=["query"])
 api_router.include_router(purchase_orders.router, prefix="/purchase-orders", tags=["purchase-orders"])
 api_router.include_router(webhooks_hepsiburada.router, prefix="/webhooks/hepsiburada", tags=["webhooks-hepsiburada"])
 api_router.include_router(hepsiburada.router, prefix="/hepsiburada", tags=["hepsiburada"])
+api_router.include_router(purchase_requests.router, prefix="/purchase-requests", tags=["purchase-requests"])
