@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Table, Card, Tag, Typography, Button, Segmented, Tooltip, message, Space,
-  Drawer, Form, Input, InputNumber, Select, DatePicker, Row, Col, Spin, Upload, Radio,
+  Drawer, Form, Input, InputNumber, Select, DatePicker, Row, Col, Spin, Upload, Radio, Popconfirm,
 } from 'antd'
 import { FilePdfOutlined, ReloadOutlined, SendOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -118,6 +118,33 @@ export default function OrdersPage() {
   const [availableInvoices, setAvailableInvoices] = useState([])
   const [loadingInvoices, setLoadingInvoices] = useState(false)
   const overrideInvoiceId = Form.useWatch('_override_invoice_id', form)
+
+  // Hepsiburada — onay bekleyen siparişler (admin/sales)
+  const [pendingHb, setPendingHb] = useState([])
+  const [approvingHbId, setApprovingHbId] = useState(null)
+  const fetchPendingHb = useCallback(() => {
+    if (!user || !['admin', 'sales'].includes(user.role)) return
+    api.get('/hepsiburada/pending-orders')
+      .then(r => setPendingHb(r.data?.orders || []))
+      .catch(() => {})
+  }, [user])
+  useEffect(() => { fetchPendingHb() }, [fetchPendingHb])
+
+  const approveHb = async (hbId) => {
+    setApprovingHbId(hbId)
+    try {
+      const r = await api.post(`/hepsiburada/approve/${hbId}`)
+      message.success(`Hepsiburada onaylandı — Paraşüt fatura #${r.data?.parasut_invoice_id} oluşturuldu. Sevkiyatlar sayfasından devam edin.`)
+      if (r.data?.unmatched_skus?.length) {
+        message.warning(`Eşleşmeyen SKU'lar (description ile geçti): ${r.data.unmatched_skus.join(', ')}`)
+      }
+      fetchPendingHb()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'HB onay hatası')
+    } finally {
+      setApprovingHbId(null)
+    }
+  }
 
   useEffect(() => {
     if (teslimSekli === 'Kargo' && !form.getFieldValue('cargo_company')) {
@@ -795,6 +822,61 @@ export default function OrdersPage() {
           />
         </div>
       </div>
+
+      {/* Hepsiburada — Onay bekleyen siparişler (admin/sales) */}
+      {['admin', 'sales'].includes(user?.role) && pendingHb.length > 0 && (
+        <div style={{
+          marginBottom: 16, padding: '14px 20px',
+          background: '#fff7e6', border: '1px solid #ffd591',
+          borderLeft: '4px solid #fa8c16', borderRadius: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Tag color="orange" style={{ margin: 0 }}>HEPSİBURADA</Tag>
+            <Text strong style={{ color: '#d46b08', fontSize: 14 }}>
+              {pendingHb.length} sipariş onayınızı bekliyor
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              · Onayda Paraşüt faturası yaratılır + HB'de paket oluşturulur
+            </Text>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pendingHb.map(o => (
+              <div key={o.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: '#fff', borderRadius: 6, padding: '8px 12px',
+                border: '1px solid #ffd591',
+              }}>
+                <div style={{ flex: 1, fontSize: 13 }}>
+                  <Text strong>#{o.order_number || o.external_order_id}</Text>
+                  {o.items?.[0]?.customerName && (
+                    <Text type="secondary" style={{ marginLeft: 8 }}>· {o.items[0].customerName}</Text>
+                  )}
+                  <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                    {(o.items || []).map((it, i) => (
+                      <span key={i}>
+                        {i > 0 && ' • '}
+                        {it.sku || '?'} × {it.quantity}
+                        {it.totalPrice && ` (${it.totalPrice} ${it.currency || 'TL'})`}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <Popconfirm
+                  title="Hepsiburada siparişini onayla?"
+                  description="Paraşüt'te fatura yaratılacak ve HB'de paket oluşturulacak."
+                  okText="Onayla" cancelText="İptal"
+                  onConfirm={() => approveHb(o.id)}
+                >
+                  <Button type="primary" size="small" loading={approvingHbId === o.id}>
+                    Onayla
+                  </Button>
+                </Popconfirm>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Card>
         <Table
           dataSource={data.List}
