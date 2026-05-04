@@ -286,9 +286,36 @@ async def preview_invoice(
             matched.append({**it, "tg_product_id": prod.tg_id, "product_id": prod.id})
         else:
             unmatched.append(it)
+    # HB teslimat adresi — Paraşüt fatura adresi'nden farklı, webhook payload'unda
+    hb_shipping = None
+    hb_rec = (db.query(HepsiburadaOrder)
+              .filter(HepsiburadaOrder.parasut_invoice_id == str(invoice_id))
+              .order_by(HepsiburadaOrder.id.desc())
+              .first())
+    if hb_rec:
+        try:
+            payload = json.loads(hb_rec.raw_payload or "{}")
+            for it in payload.get("items") or []:
+                sa = it.get("shippingAddress") or {}
+                if sa:
+                    hb_shipping = {
+                        "address": sa.get("address") or sa.get("addressDetail") or "",
+                        "name": sa.get("name") or "",
+                        "email": sa.get("email") or "",
+                        "phone": sa.get("phoneNumber") or sa.get("alternatePhoneNumber") or "",
+                        "city": sa.get("city") or "",
+                        "district": sa.get("town") or sa.get("district") or "",
+                        "neighborhood": sa.get("district") or "",  # mahalle
+                        "country_code": sa.get("countryCode") or "TR",
+                    }
+                    break
+        except Exception as e:
+            logger.warning(f"HB shipping address parse hatası: {e}")
+
     return {
         "invoice": full["invoice"],
         "contact": full["contact"],
+        "hb_shipping_address": hb_shipping,
         "line_items": items,
         "matched_count": len(matched),
         "unmatched_count": len(unmatched),
