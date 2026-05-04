@@ -543,7 +543,9 @@ export default function ProductsPage() {
 
   const openApproveDrawer = (record) => {
     setApproveRecord(record)
-    setApproveParentCat(null)
+    // Sales/warehouse'un girdiği parent_category önce state'e set edilmeli ki child select'in
+    // options'ı doğru filtrelensin (cascading)
+    setApproveParentCat(record.parent_category_id || null)
     approveForm.resetFields()
     approveForm.setFieldsValue({
       brand: record.brand,
@@ -556,6 +558,8 @@ export default function ProductsPage() {
       unit: record.unit || 'adet',
       details: record.details,
       sku: '',
+      parent_category_id: record.parent_category_id || undefined,
+      category_id: record.category_id || undefined,
     })
     setApproveDrawerOpen(true)
   }
