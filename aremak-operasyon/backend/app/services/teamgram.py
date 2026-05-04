@@ -412,9 +412,16 @@ async def update_order_custom_fields(order_id: int, field_updates: dict) -> bool
     field_updates: {custom_field_id: value_string}
     Fetches the full order, patches CustomFieldDatas, then POSTs back.
 
-    Attachment-type custom fields (193472 gibi) Orders/Edit ile gönderilince
-    TeamGram tarafından temizlenebilir. Bu yüzden bu alanları, field_updates'de
-    açıkça belirtilmedikçe Edit payload'ından çıkarıyoruz.
+    UYARI — TeamGram Orders/Edit kısıtlamaları:
+      - Edit payload'ında `CustomFieldDatas` key'i bulunduğu sürece (içinde
+        attachment CF olsa da olmasa da) attachment-tipi CF'ler (örn 193472
+        Ödeme Belgesi) temizlenir. Bu fonksiyon CFD listesi GÖNDERMEK zorunda
+        olduğundan, bu çağrı attachment CF'leri silebilir. Bu yüzden non-attachment
+        CF güncellemelerini sadece bilinçli durumlarda kullan.
+      - Attachment-tipi CF'leri (193472) Edit payload'ı üzerinden SET ETMEK de
+        mümkün değil — Value gönderilse bile TG temizler. Sadece
+        /Attachment/PostAttachment ile gerçek dosya yüklemesi sırasında
+        TG kendisi CF'yi günceller.
     """
     ATTACHMENT_CF_IDS = {193472}
 
@@ -451,6 +458,10 @@ async def update_order_status(order_id: int, status: int, stage_name: Optional[s
     """
     Update TeamGram order Status (0=Açık, 1=Tamamlandı, 2=İptal).
     Optionally also set the pipeline stage by display name (e.g. "Hazırlanıyor").
+
+    NOT: Orders/Edit payload'ında `CustomFieldDatas` key'i bulunduğu sürece
+    (içeriği boş bile olsa) attachment-tipi custom field'lar (193472=Ödeme Belgesi gibi)
+    TeamGram tarafından temizlenir. Bu yüzden CFD key'i payload'dan TAMAMEN OMIT edilir.
     """
     order = await get_order(order_id)
     order["RelatedEntityId"] = order.get("RelatedEntity", {}).get("Id")
@@ -461,6 +472,9 @@ async def update_order_status(order_id: int, status: int, stage_name: Optional[s
         stage_id = await _find_stage_id(stage_name)
         if stage_id:
             order["CustomStageId"] = stage_id
+
+    # CFD key payload'da olmamalı — yoksa TG attachment-tipi CF'leri temizler.
+    order.pop("CustomFieldDatas", None)
 
     url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
     async with httpx.AsyncClient(timeout=30) as client:
@@ -488,11 +502,15 @@ async def _find_stage_id(stage_name: str) -> Optional[int]:
 
 
 async def clear_order_has_invoice(order_id: int) -> bool:
-    """Attempt to set HasInvoice=False on a TeamGram order (best-effort)."""
+    """Attempt to set HasInvoice=False on a TeamGram order (best-effort).
+
+    CFD key payload'dan çıkarılır — bkz. update_order_status notu (attachment CF koruması).
+    """
     try:
         order = await get_order(order_id)
         order["RelatedEntityId"] = order.get("RelatedEntity", {}).get("Id")
         order["HasInvoice"] = False
+        order.pop("CustomFieldDatas", None)
         url = f"{BASE}/v1/{DOMAIN}/Orders/Edit"
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, headers=HEADERS, json=order)
