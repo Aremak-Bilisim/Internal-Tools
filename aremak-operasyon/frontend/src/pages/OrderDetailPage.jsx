@@ -76,7 +76,9 @@ export default function OrderDetailPage() {
         setOrder(o)
 
         if (shipmentsRes.status === 'fulfilled') {
-          const found = shipmentsRes.value.data.find((s) => s.tg_order_id === Number(id))
+          // İptal edilen sevk taleplerini yoksay — aktif olanı bulalım
+          const activeShipments = shipmentsRes.value.data.filter((s) => s.stage !== 'iptal_edildi')
+          const found = activeShipments.find((s) => s.tg_order_id === Number(id))
           setShipment(found || null)
           // Fatura detaylarını çek
           const invId = found?.invoice_url?.split('/').pop()

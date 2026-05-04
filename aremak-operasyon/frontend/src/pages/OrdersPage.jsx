@@ -220,12 +220,14 @@ export default function OrdersPage() {
 
   useEffect(() => {
     api.get('/shipments').then((r) => {
-      const ids = new Set(r.data.map((s) => s.tg_order_id).filter(Boolean))
-      const names = new Set(r.data.map((s) => s.tg_order_name).filter(Boolean))
+      // İptal edilen sevk talepleri "Sevk Talebi Oluştur" butonunu engellememeli
+      const active = r.data.filter((s) => s.stage !== 'iptal_edildi')
+      const ids = new Set(active.map((s) => s.tg_order_id).filter(Boolean))
+      const names = new Set(active.map((s) => s.tg_order_name).filter(Boolean))
       setShipmentOrderIds(ids)
       setShipmentOrderNames(names)
       const explicit = {}
-      for (const s of r.data) {
+      for (const s of active) {
         if (s.tg_order_id && s.invoice_url) {
           explicit[s.tg_order_id] = { url: s.invoice_url, invoice_no: s.invoice_no }
         }
