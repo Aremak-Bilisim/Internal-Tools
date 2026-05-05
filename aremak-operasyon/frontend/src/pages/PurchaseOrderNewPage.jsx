@@ -46,14 +46,18 @@ export default function PurchaseOrderNewPage() {
         match: { id: it.product_id, tg_id: it.product_tg_id, displayname: `${it.brand || ''} ${it.model || ''}`.trim(), sku: it.sku },
         quantity: it.quantity,
         unit_price: it.unit_price,
+        currency: it.currency || null,
         description: `${it.brand || ''} ${it.model || ''}`.trim(),
       }))
       setItems(popItems)
+      // Talep listesi item'larından ilk geçerli currency'yi al (TG siparişi tek PB destekler).
+      // Karışık PB varsa kullanıcıyı tabloda uyaracağız.
+      const listCurrency = (lst.items || []).map(it => it.currency).find(Boolean) || 'USD'
       setParsed({
         supplier: lst.supplier_name,
         tg_supplier_id: lst.tg_supplier_id,
         po_no: null,
-        currency: popItems[0]?.unit_price ? (lst.items[0]?.currency || 'USD') : 'USD',
+        currency: listCurrency,
         order_date: dayjs().format('YYYY-MM-DD'),
       })
       setPoName(`${lst.supplier_name || 'Tedarikçi'} - Talep Listesi #${lst.id}`)
@@ -204,6 +208,7 @@ export default function PurchaseOrderNewPage() {
     }
   }
 
+  const currency = parsed?.currency || 'USD'
   const itemColumns = [
     { title: '#', dataIndex: 'item_no', key: 'item_no', width: 50 },
     {
@@ -228,21 +233,32 @@ export default function PurchaseOrderNewPage() {
       ),
     },
     {
-      title: 'Birim Fiyat (USD)', dataIndex: 'unit_price', key: 'unit_price', width: 130,
-      render: (v, _, idx) => (
-        <InputNumber
-          size="small"
-          value={v}
-          style={{ width: 110 }}
-          precision={2}
-          step={0.01}
-          min={0}
-          onChange={(val) => updateItemField(idx, 'unit_price', val ?? 0)}
-        />
-      ),
+      title: `Birim Fiyat (${currency})`, dataIndex: 'unit_price', key: 'unit_price', width: 140,
+      render: (v, it, idx) => {
+        const itemCur = it.currency
+        const mismatch = itemCur && itemCur !== currency
+        return (
+          <Space size={4}>
+            <InputNumber
+              size="small"
+              value={v}
+              style={{ width: 110 }}
+              precision={2}
+              step={0.01}
+              min={0}
+              onChange={(val) => updateItemField(idx, 'unit_price', val ?? 0)}
+            />
+            {mismatch && (
+              <Tag color="orange" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px' }} title={`Talep listesindeki PB: ${itemCur}`}>
+                {itemCur}
+              </Tag>
+            )}
+          </Space>
+        )
+      },
     },
     {
-      title: 'Tutar (USD)', key: 'line_total', width: 110,
+      title: `Tutar (${currency})`, key: 'line_total', width: 110,
       render: (_, it) => {
         const lt = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0)
         return <Text strong>{lt.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
@@ -401,8 +417,17 @@ export default function PurchaseOrderNewPage() {
               const qtyMismatch = docQty != null && Math.abs(calcQty - docQty) > 0.001
               const amountMismatch = docAmount != null && Math.abs(calcAmount - docAmount) > 0.01
               const mismatch = qtyMismatch || amountMismatch
+              const distinctCurrencies = [...new Set(items.map(i => i.currency).filter(Boolean))]
+              const mixedCurrency = distinctCurrencies.length > 1
               return (
                 <>
+                  {mixedCurrency && (
+                    <Alert
+                      type="warning" showIcon style={{ marginBottom: 12 }}
+                      message={`Karışık para birimi: ${distinctCurrencies.join(', ')}`}
+                      description={`Sipariş tek para birimi (${currency}) ile oluşturulacak. Farklı PB'li satırların fiyatlarını ${currency} cinsinden düzeltmen gerekir.`}
+                    />
+                  )}
                   <Table
                     dataSource={items}
                     columns={itemColumns}
@@ -421,7 +446,7 @@ export default function PurchaseOrderNewPage() {
                           <Table.Summary.Cell index={3} />
                           <Table.Summary.Cell index={4}>
                             <Text strong>
-                              {calcAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                              {calcAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currency}
                             </Text>
                           </Table.Summary.Cell>
                           <Table.Summary.Cell index={5} />
@@ -447,7 +472,7 @@ export default function PurchaseOrderNewPage() {
                             {qtyMismatch && <Tag color="red" style={{ marginLeft: 8 }}>Fark: {(calcQty - docQty).toFixed(2)}</Tag>}
                           </div>
                           <div>
-                            <strong>Tutar:</strong> hesap {calcAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} USD ↔ PDF {docAmount?.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) ?? '-'} USD
+                            <strong>Tutar:</strong> hesap {calcAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {currency} ↔ PDF {docAmount?.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) ?? '-'} {currency}
                             {amountMismatch && <Tag color="red" style={{ marginLeft: 8 }}>Fark: {(calcAmount - docAmount).toFixed(2)}</Tag>}
                           </div>
                         </div>
