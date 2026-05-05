@@ -356,13 +356,49 @@ export default function PurchaseOrderNewPage() {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="İlgili Kişi">Sun Zhiping</Descriptions.Item>
-              <Descriptions.Item label="PO No">{parsed.po_no || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Para Birimi">{parsed.currency}</Descriptions.Item>
+              <Descriptions.Item label="PO No">
+                {fromList ? (
+                  <Input
+                    size="small"
+                    value={parsed.po_no || ''}
+                    placeholder="Tedarikçi PO numarası..."
+                    onChange={(e) => setParsed(p => ({ ...p, po_no: e.target.value || null }))}
+                    style={{ maxWidth: 220 }}
+                  />
+                ) : (parsed.po_no || '-')}
+              </Descriptions.Item>
+              <Descriptions.Item label="Para Birimi">
+                {fromList ? (
+                  <Select
+                    size="small"
+                    value={parsed.currency}
+                    onChange={(val) => setParsed(p => ({ ...p, currency: val }))}
+                    options={[
+                      { value: 'USD', label: 'USD' },
+                      { value: 'EUR', label: 'EUR' },
+                      { value: 'TRL', label: 'TRL' },
+                    ]}
+                    style={{ width: 100 }}
+                  />
+                ) : parsed.currency}
+              </Descriptions.Item>
               <Descriptions.Item label="PDF Toplam Adet">
                 {parsed.doc_total_quantity?.toLocaleString('tr-TR') ?? '-'}
               </Descriptions.Item>
               <Descriptions.Item label="PDF Toplam Tutar">
-                {parsed.doc_total_amount != null
+                {fromList ? (
+                  <InputNumber
+                    size="small"
+                    value={parsed.doc_total_amount}
+                    placeholder="Proformadaki toplam..."
+                    precision={2}
+                    step={0.01}
+                    min={0}
+                    onChange={(val) => setParsed(p => ({ ...p, doc_total_amount: val }))}
+                    addonAfter={parsed.currency}
+                    style={{ maxWidth: 220 }}
+                  />
+                ) : parsed.doc_total_amount != null
                   ? `${parsed.doc_total_amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${parsed.currency}`
                   : '-'}
               </Descriptions.Item>
