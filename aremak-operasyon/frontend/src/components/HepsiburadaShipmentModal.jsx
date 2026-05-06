@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Modal, List, Spin, Typography, Tag, Button, Steps, Form, Input, Select, message, Alert, Table } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
 import api from '../services/api'
 
 const { Text } = Typography
@@ -26,9 +27,15 @@ export default function HepsiburadaShipmentModal({ open, onClose, onCreated }) {
     }
   }, [open])
 
-  const loadPending = async () => {
+  const loadPending = async (refresh = true) => {
     setLoading(true)
     try {
+      // Modal açılışı + manuel yenileme: önce Paraşüt cache'ini tazele, böylece
+      // yeni oluşturulmuş faturalar (örn. az önce yaratılan HB faturası) listede görünür.
+      // 30 dk TTL'lik cache yüzünden eski liste dönüyordu.
+      if (refresh) {
+        try { await api.post('/parasut/invoices/refresh') } catch { /* cache fallback */ }
+      }
       const r = await api.get('/hepsiburada/pending-invoices')
       setPendingList(r.data?.invoices || [])
     } catch (e) {
@@ -122,29 +129,44 @@ export default function HepsiburadaShipmentModal({ open, onClose, onCreated }) {
       ]} />
 
       {step === 0 && (
-        loading ? <Spin /> : pendingList.length === 0 ? (
-          <Alert type="info" message="Bekleyen Hepsiburada faturası yok" />
-        ) : (
-          <List
-            dataSource={pendingList}
-            renderItem={(inv) => (
-              <List.Item
-                actions={[<Button key="s" type="primary" size="small" onClick={() => pickInvoice(inv)}>Seç</Button>]}
-              >
-                <List.Item.Meta
-                  title={inv.description || `Fatura #${inv.invoice_no || inv.id}`}
-                  description={
-                    <span>
-                      <Tag>{inv.issue_date}</Tag>
-                      <Text type="secondary">{inv.gross_total} {inv.currency}</Text>
-                      {inv.contact_name && <Text type="secondary"> · {inv.contact_name}</Text>}
-                    </span>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        )
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Bekleyen Hepsiburada faturaları
+            </Text>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={loading}
+              onClick={() => loadPending(true)}
+            >
+              Yenile
+            </Button>
+          </div>
+          {loading ? <Spin /> : pendingList.length === 0 ? (
+            <Alert type="info" message="Bekleyen Hepsiburada faturası yok" />
+          ) : (
+            <List
+              dataSource={pendingList}
+              renderItem={(inv) => (
+                <List.Item
+                  actions={[<Button key="s" type="primary" size="small" onClick={() => pickInvoice(inv)}>Seç</Button>]}
+                >
+                  <List.Item.Meta
+                    title={inv.description || `Fatura #${inv.invoice_no || inv.id}`}
+                    description={
+                      <span>
+                        <Tag>{inv.issue_date}</Tag>
+                        <Text type="secondary">{inv.gross_total} {inv.currency}</Text>
+                        {inv.contact_name && <Text type="secondary"> · {inv.contact_name}</Text>}
+                      </span>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          )}
+        </>
       )}
 
       {step === 1 && preview && (

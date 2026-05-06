@@ -310,6 +310,27 @@ async def get_purchases(page: int = 1, pagesize: int = 50, party_id: Optional[in
     return await _get(f"{DOMAIN}/Purchases/Index", params)
 
 
+async def find_contact_id_for_company(company_id: int, name_query: str) -> Optional[int]:
+    """Bir şirketin contact'ları içinde isme göre arar, ilk eşleşmenin Id'sini döndürür.
+    İsim normalleştirme: case-insensitive, trim, Türkçe i/ı eşitliği."""
+    if not company_id or not name_query:
+        return None
+    needle = name_query.strip().lower().replace("i̇", "i").replace("ı", "i")
+    if not needle:
+        return None
+    try:
+        data = await _get(f"{DOMAIN}/Contacts/Index", {"ofid": company_id, "page": 1, "pagesize": 100})
+    except Exception:
+        return None
+    contacts = data.get("Contacts") or data.get("List") or []
+    for c in contacts:
+        full = (c.get("Displayname") or f"{c.get('Name') or ''} {c.get('LastName') or ''}").strip()
+        norm = full.lower().replace("i̇", "i").replace("ı", "i")
+        if needle in norm or norm in needle:
+            return c.get("Id")
+    return None
+
+
 async def get_purchase(purchase_id: int) -> dict:
     """Tek bir tedarikçi siparişinin detayı."""
     return await _get(f"{DOMAIN}/Purchases/Get", {"id": purchase_id})

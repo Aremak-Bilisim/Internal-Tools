@@ -66,6 +66,7 @@ class CreatePurchaseIn(BaseModel):
     delivery_address: str = DEFAULT_DELIVERY_ADDRESS
     billing_address: str = DEFAULT_DELIVERY_ADDRESS
     currency: str = "USD"
+    attn_name: Optional[str] = None  # İlgili kişi adı; verilirse tedarikçinin TG contact'ları arasında aranır
     items: list[PurchaseItemIn]
     request_list_id: Optional[int] = None   # talep listesinden donusturuluyorsa, basarili olunca liste kapatilir
 
@@ -453,6 +454,17 @@ async def create_purchase(
         attn_id = SUN_ZHIPING_CONTACT_ID
     else:
         raise HTTPException(400, f"'{data.supplier}' tedarikçisi için tg_supplier_id gerekli")
+
+    # Kullanıcı attn_name verdiyse TG contact'larında ara → eşleşirse override et
+    if data.attn_name:
+        looked_up = await teamgram.find_contact_id_for_company(related_entity_id, data.attn_name)
+        if looked_up:
+            attn_id = looked_up
+        else:
+            logger.warning(f"İlgili kişi '{data.attn_name}' tedarikçide bulunamadı; AttnId set edilmiyor")
+            # Hikrobot default (Sun Zhiping) yerine None: kullanıcı farklı isim girdi ama yok
+            if data.tg_supplier_id != HIKROBOT_COMPANY_ID and not (data.supplier.lower() == "hikrobot"):
+                attn_id = None
 
     # TG payload'unu hazırla
     order_date_str = (data.order_date or datetime.utcnow().strftime("%Y-%m-%d")) + "T00:00:00"

@@ -22,6 +22,7 @@ export default function PurchaseOrderNewPage() {
   const [pdfFile, setPdfFile] = useState(null) // sipariş oluştururken yüklenecek orijinal PDF
   const [poName, setPoName] = useState('')
   const [orderDate, setOrderDate] = useState(null)  // dayjs
+  const [attnName, setAttnName] = useState('')
   const [deliveryAddress, setDeliveryAddress] = useState(
     'Mustafa Kemal Mah. Dumlupınar Blv. No: 280G İç Kapı No:1260 Çankaya/Ankara'
   )
@@ -62,6 +63,8 @@ export default function PurchaseOrderNewPage() {
       })
       setPoName(`${lst.supplier_name || 'Tedarikçi'} - Talep Listesi #${lst.id}`)
       setOrderDate(dayjs())
+      // Hikrobot için Sun Zhiping default; diğer tedarikçilerde boş, kullanıcı elle girer
+      setAttnName(lst.supplier_name === 'Hikrobot' ? 'Sun Zhiping' : '')
       message.info(`Liste #${lst.id}'den ${popItems.length} kalem yüklendi`)
     }).catch(() => message.error('Liste yüklenemedi'))
   }, [fromListId])
@@ -82,6 +85,7 @@ export default function PurchaseOrderNewPage() {
       setItems(data.items || [])
       setPoName(`Hikrobot - ${data.po_no || file.name}`)
       setOrderDate(data.order_date ? dayjs(data.order_date) : dayjs())
+      setAttnName(data.supplier === 'Hikrobot' ? 'Sun Zhiping' : '')
       setPdfFile(file)  // orijinal PDF'i sakla — sipariş yaratıldıktan sonra yüklenecek
       message.success(`PDF parse edildi (${data.items?.length || 0} ürün)`)
     } catch (e) {
@@ -159,6 +163,7 @@ export default function PurchaseOrderNewPage() {
         delivery_address: deliveryAddress,
         billing_address: deliveryAddress,
         currency: parsed.currency || 'USD',
+        attn_name: attnName?.trim() || null,
         items: items.map((it) => ({
           product_id: it.match.id,
           tg_product_id: it.match.tg_id,
@@ -355,7 +360,15 @@ export default function PurchaseOrderNewPage() {
                   {parsed.supplier === 'Hikrobot' ? 'Hangzhou Hikrobot Intelligent Co., Ltd.' : parsed.supplier || 'Bilinmiyor'}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="İlgili Kişi">Sun Zhiping</Descriptions.Item>
+              <Descriptions.Item label="İlgili Kişi">
+                <Input
+                  size="small"
+                  value={attnName}
+                  placeholder="İlgili kişi adı..."
+                  onChange={(e) => setAttnName(e.target.value)}
+                  style={{ maxWidth: 220 }}
+                />
+              </Descriptions.Item>
               <Descriptions.Item label="PO No">
                 {fromList ? (
                   <Input
@@ -383,7 +396,16 @@ export default function PurchaseOrderNewPage() {
                 ) : parsed.currency}
               </Descriptions.Item>
               <Descriptions.Item label="PDF Toplam Adet">
-                {parsed.doc_total_quantity?.toLocaleString('tr-TR') ?? '-'}
+                {fromList ? (
+                  <InputNumber
+                    size="small"
+                    value={parsed.doc_total_quantity}
+                    placeholder="Proformadaki adet..."
+                    min={0}
+                    onChange={(val) => setParsed(p => ({ ...p, doc_total_quantity: val }))}
+                    style={{ maxWidth: 220 }}
+                  />
+                ) : (parsed.doc_total_quantity?.toLocaleString('tr-TR') ?? '-')}
               </Descriptions.Item>
               <Descriptions.Item label="PDF Toplam Tutar">
                 {fromList ? (
