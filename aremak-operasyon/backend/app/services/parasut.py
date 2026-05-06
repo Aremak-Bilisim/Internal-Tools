@@ -981,6 +981,57 @@ async def get_all_products() -> list:
     return all_items
 
 
+async def create_product(
+    code: str,
+    name: str,
+    list_price: float = 0.0,
+    currency: str = "TRL",
+    buying_price: float = 0.0,
+    buying_currency: str = "TRL",
+    vat_rate: float = 20.0,
+    unit: str = "Adet",
+    inventory_tracking: bool = False,
+) -> Optional[dict]:
+    """Paraşüt'te yeni ürün yaratır. Returns {id, code, name} on success.
+
+    Currency Paraşüt formatında olmalı: 'TRL' (TL değil), 'USD', 'EUR'.
+    code Paraşüt'te 'stok kodu'; SKU buraya yazılır → sync_parasut_match
+    sonraki çalışmasında bu ürünü local DB'ye otomatik bağlayacak.
+    """
+    if not code or not name:
+        logger.warning(f"create_product: code/name boş ({code!r}, {name!r})")
+        return None
+    payload = {
+        "data": {
+            "type": "products",
+            "attributes": {
+                "code": code,
+                "name": name,
+                "list_price": list_price or 0.0,
+                "currency": currency or "TRL",
+                "buying_price": buying_price or 0.0,
+                "buying_currency": buying_currency or "TRL",
+                "vat_rate": vat_rate if vat_rate is not None else 20.0,
+                "unit": unit or "Adet",
+                "inventory_tracking": bool(inventory_tracking),
+            }
+        }
+    }
+    try:
+        result = await _api_post("products", payload)
+    except Exception as e:
+        logger.error(f"Paraşüt ürün yaratma hatası ({code}): {e}")
+        return None
+    d = result.get("data", {}) if isinstance(result, dict) else {}
+    pid = d.get("id")
+    if not pid:
+        logger.warning(f"Paraşüt ürün yaratıldı ama ID alınamadı: {result}")
+        return None
+    attrs = d.get("attributes", {}) or {}
+    logger.info(f"Paraşüt'te yeni ürün yaratıldı: id={pid} code={code}")
+    return {"id": str(pid), "code": attrs.get("code") or code, "name": attrs.get("name") or name}
+
+
 async def search_product_by_code(code: str) -> Optional[dict]:
     """Paraşüt'te stok kodu (code) ile ürün arar. Eşleşen ilk ürünü döndürür."""
     if not code:

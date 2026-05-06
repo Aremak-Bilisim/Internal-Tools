@@ -246,7 +246,17 @@ def _create_irsaliye_for_sample(db: Session, s: SampleRequest, tg_opportunity_id
             warnings.append(f"Paraşüt'te '{s.customer_name}' carisi bulunamadı. İrsaliye oluşturulamadı.")
             return warnings
 
-        # 2. TG product ID → Paraşüt product ID (local DB üzerinden)
+        # 2. TG product ID → Paraşüt product ID
+        # Sıra: local DB cache → canlı Paraşüt SKU lookup → Paraşüt'te ürünü yarat
+        # (sync_parasut_match 24 saatte bir, yeni eklenen ürünler için bu zincir kritik.)
+        def _to_parasut_currency(name: Optional[str]) -> str:
+            n = (name or "").upper()
+            if n in ("TL", "TRY"):
+                return "TRL"
+            if n in ("USD", "EUR"):
+                return n
+            return "TRL"
+
         parasut_items = []
         for item in (s.items or []):
             tg_id = item.get("product_id")
@@ -254,8 +264,45 @@ def _create_irsaliye_for_sample(db: Session, s: SampleRequest, tg_opportunity_id
             if not tg_id or qty <= 0:
                 continue
             product = db.query(Product).filter(Product.tg_id == tg_id).first()
-            if product and product.parasut_id:
-                parasut_items.append({"parasut_product_id": product.parasut_id, "quantity": qty})
+            parasut_id = product.parasut_id if product else None
+
+            # Fallback 1: local'de yoksa Paraşüt'te SKU ile canlı ara
+            if not parasut_id and product and product.sku:
+                try:
+                    res = asyncio.run(parasut.search_product_by_code(product.sku))
+                    if res and res.get("id"):
+                        parasut_id = res["id"]
+                        product.parasut_id = parasut_id
+                        db.commit()
+                        logger.info(f"Paraşüt SKU lookup eşleşti: tg_id={tg_id} sku={product.sku} → parasut_id={parasut_id}")
+                except Exception as e:
+                    logger.warning(f"Paraşüt SKU lookup hatası (sku={product.sku}): {e}")
+
+            # Fallback 2: Paraşüt'te de yoksa SKU ile yeni ürün yarat
+            if not parasut_id and product and product.sku:
+                pname = f"{product.brand or ''} - {product.prod_model or ''}".strip(" -") or product.sku
+                try:
+                    created = asyncio.run(parasut.create_product(
+                        code=product.sku,
+                        name=pname,
+                        list_price=product.price or 0.0,
+                        currency=_to_parasut_currency(product.currency_name),
+                        buying_price=product.purchase_price or 0.0,
+                        buying_currency=_to_parasut_currency(product.purchase_currency_name),
+                        vat_rate=product.vat if product.vat is not None else 20.0,
+                        unit=product.unit or "Adet",
+                        inventory_tracking=False,
+                    ))
+                    if created and created.get("id"):
+                        parasut_id = created["id"]
+                        product.parasut_id = parasut_id
+                        db.commit()
+                        logger.info(f"Paraşüt'te yeni ürün yaratıldı + lokal cache'lendi: sku={product.sku} → parasut_id={parasut_id}")
+                except Exception as e:
+                    logger.warning(f"Paraşüt ürün yaratma hatası (sku={product.sku}): {e}")
+
+            if parasut_id:
+                parasut_items.append({"parasut_product_id": parasut_id, "quantity": qty})
             else:
                 warnings.append(f"'{item.get('product_name', tg_id)}' ürününün Paraşüt eşleşmesi yok, irsaliyeye eklenmedi.")
 
