@@ -71,21 +71,23 @@ export default function HepsiburadaShipmentModal({ open, onClose, onCreated }) {
         message.error('Tüm eşleşmeyen SKU\'lar için ürün seçin')
         return
       }
-      // Form'u doldur — öncelik: HB teslimat adresi (gerçek müşteri); yoksa Paraşüt cari fatura adresi
+      // Form'u doldur — sadece HB teslimat adresi (webhook'tan) varsa.
+      // Paraşüt cari = bill-to (fatura kesilen kişi/şirket); ALICI değil.
+      // HB API/webhook aktif değilken alıcı bilgileri form'a otomatik gelmez,
+      // kullanıcı HB platformundan bakıp elle girer.
       const ship = preview.hb_shipping_address
-      const c = preview.contact || {}
-      const addrLine = ship?.address || c.address || ''
-      const fullAddr = ship && ship.neighborhood && !addrLine.includes(ship.neighborhood)
+      const addrLine = ship?.address || ''
+      const fullAddr = ship?.neighborhood && !addrLine.includes(ship.neighborhood)
         ? `${addrLine}${addrLine ? ' ' : ''}${ship.neighborhood}`
         : addrLine
       form.setFieldsValue({
         delivery_type: 'Kargo',
         cargo_company: 'Yurtiçi Kargo',
         delivery_address: fullAddr,
-        delivery_city: ship?.city || c.city || '',
-        delivery_district: ship?.district || c.district || '',
-        recipient_name: ship?.name || c.name || '',
-        recipient_phone: ship?.phone || c.phone || '',
+        delivery_city: ship?.city || '',
+        delivery_district: ship?.district || '',
+        recipient_name: ship?.name || '',
+        recipient_phone: ship?.phone || '',
       })
       setStep(2)
     }
