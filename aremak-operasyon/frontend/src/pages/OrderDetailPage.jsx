@@ -6,18 +6,9 @@ import {
 import { ArrowLeftOutlined, LinkOutlined, DeleteOutlined, ExportOutlined, FilePdfOutlined, BranchesOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import api from '../services/api'
+import { parseCfNumber } from '../utils/tgNumber'
 
 const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
-
-const parseTgNumber = (val) => {
-  if (val == null || val === '') return NaN
-  const s = String(val).trim()
-  const lastComma = s.lastIndexOf(',')
-  const lastPeriod = s.lastIndexOf('.')
-  if (lastComma === -1 && lastPeriod === -1) return parseFloat(s)
-  if (lastComma > lastPeriod) return parseFloat(s.replace(/\./g, '').replace(',', '.'))
-  return parseFloat(s.replace(/,/g, ''))
-}
 
 const { Title, Text } = Typography
 
@@ -199,7 +190,7 @@ export default function OrderDetailPage() {
   const odemeVal = parseCfSelectId(cfById['193501'])
   const odemeDurumu = odemeVal === '14858' ? 'Ödendi' : odemeVal === '14859' ? 'Ödenecek' : '-'
   const beklenenTarih = cfById['193502']?.UnFormattedDate || cfById['193502']?.Value?.slice(0, 10) || '-'
-  const odemeTutariParsed = parseTgNumber(cfById['193526']?.Value)
+  const odemeTutariParsed = parseCfNumber(cfById['193526'])
   const odemeTutari = !isNaN(odemeTutariParsed) ? odemeTutariParsed : null
   const odemePbRaw = (() => { try { return JSON.parse(cfById['193527']?.Value ?? 'null')?.Value } catch { return null } })()
   let odemeBelgeleri = null

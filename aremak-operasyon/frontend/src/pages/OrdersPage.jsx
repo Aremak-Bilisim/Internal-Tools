@@ -8,24 +8,12 @@ import { FilePdfOutlined, ReloadOutlined, SendOutlined, EyeOutlined } from '@ant
 import dayjs from 'dayjs'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { parseCfNumber } from '../utils/tgNumber'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
 
 const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
-
-const parseTgNumber = (val) => {
-  if (val == null || val === '') return NaN
-  const s = String(val).trim()
-  const lastComma = s.lastIndexOf(',')
-  const lastPeriod = s.lastIndexOf('.')
-  if (lastComma === -1 && lastPeriod === -1) return parseFloat(s)
-  if (lastComma > lastPeriod) {
-    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
-  } else {
-    return parseFloat(s.replace(/,/g, ''))
-  }
-}
 
 const STATUS_COLORS = { 0: 'blue', 1: 'green', 2: 'red' }
 const STATUS_LABELS = { 0: 'Açık', 1: 'Tamamlandı', 2: 'İptal' }
@@ -479,7 +467,7 @@ export default function OrdersPage() {
       try { documents = JSON.parse(cfById[193472]?.Value || 'null') } catch {}
 
       // 193526: Ödeme Tutarı (number)
-      const odemeTutariParsed = parseTgNumber(cfById[193526]?.Value)
+      const odemeTutariParsed = parseCfNumber(cfById[193526])
       const amount = !isNaN(odemeTutariParsed) ? odemeTutariParsed : null
 
       // 193527: Ödeme Para Birimi (select: 14860=TRL, 14861=USD, 14862=EUR)

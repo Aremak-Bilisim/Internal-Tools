@@ -5,27 +5,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
+import { parseCfNumber } from '../utils/tgNumber'
 
 const CARGO_COMPANIES = ['Yurtiçi Kargo', 'Aras Kargo', 'MNG Kargo', 'PTT Kargo', 'Sürat Kargo', 'DHL', 'UPS']
 
 const attachmentUrl = (url) => `/api/orders/proxy/attachment?url=${encodeURIComponent(url)}`
-
-// TeamGram sayı formatını otomatik tespit ederek parse eder.
-// Son ayırıcı virgülse → Türk formatı ("26.007,23"), noktaysa → US formatı ("26,007.23")
-const parseTgNumber = (val) => {
-  if (val == null || val === '') return NaN
-  const s = String(val).trim()
-  const lastComma = s.lastIndexOf(',')
-  const lastPeriod = s.lastIndexOf('.')
-  if (lastComma === -1 && lastPeriod === -1) return parseFloat(s)
-  if (lastComma > lastPeriod) {
-    // Türk formatı: "26.007,23" → nokta=binlik, virgül=ondalık
-    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
-  } else {
-    // US formatı: "26,007.23" → virgül=binlik, nokta=ondalık
-    return parseFloat(s.replace(/,/g, ''))
-  }
-}
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -199,7 +183,7 @@ export default function ShipmentDetailPage() {
         setEditOdemeDoc(odemeBelgesi)
 
         // 193526: Ödeme Tutarı (number)
-        const odemeTutariParsed = parseTgNumber(cfById[193526]?.Value)
+        const odemeTutariParsed = parseCfNumber(cfById[193526])
         const odemeTutariVal = !isNaN(odemeTutariParsed) ? odemeTutariParsed : undefined
 
         // 193527: Ödeme Para Birimi (select: 14860=TRL, 14861=USD, 14862=EUR)
@@ -775,7 +759,7 @@ export default function ShipmentDetailPage() {
             const beklenenTarih = beklenenRaw ? beklenenRaw.slice(0, 10) : null
             let odemeBelgeleri = null
             try { odemeBelgeleri = JSON.parse(cfById['193472']?.Value || 'null') } catch {}
-            const odemeTutariParsed = parseTgNumber(cfById['193526']?.Value)
+            const odemeTutariParsed = parseCfNumber(cfById['193526'])
             const odemeTutari = !isNaN(odemeTutariParsed) ? odemeTutariParsed : null
             const odemePbRaw = (() => { try { return JSON.parse(cfById['193527']?.Value ?? 'null')?.Value } catch { return null } })()
 
