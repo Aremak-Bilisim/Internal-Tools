@@ -200,7 +200,7 @@ export default function ShipmentDetailPage() {
       const values = await editForm.validateFields()
       setEditSubmitting(true)
       // 1) Talebi güncelle
-      await api.put(`/shipments/${id}`, {
+      const putRes = await api.put(`/shipments/${id}`, {
         customer_name: shipment.customer_name,
         tg_order_id: shipment.tg_order_id,
         tg_order_name: shipment.tg_order_name,
@@ -226,7 +226,12 @@ export default function ShipmentDetailPage() {
 
       // Yeniden gönder (revizyon_bekleniyor → pending_admin)
       await api.post(`/shipments/${id}/advance`, { note: 'Revizyon tamamlandı, yeniden gönderildi.' })
-      message.success('Talep güncellendi ve yeniden gönderildi')
+      const resWarnings = putRes.data?.warnings || []
+      if (resWarnings.length > 0) {
+        resWarnings.forEach(w => message.warning(w, 8))
+      } else {
+        message.success('Talep güncellendi ve yeniden gönderildi')
+      }
       setEditDrawerOpen(false)
       load()
     } catch (err) {

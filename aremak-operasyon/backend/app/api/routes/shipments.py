@@ -347,57 +347,57 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
         except Exception as e:
             logger.error(f"TeamGram status update failed: {e}")
 
-    # 3. Paraşüt irsaliye — only when shipping_doc_type includes İrsaliye
-    doc_type = shipment.get("shipping_doc_type") or ""
-    invoice_url = shipment.get("invoice_url") or ""
-    # Mevcut irsaliye seçildiyse yeni oluşturmayı atla
-    if "İrsaliye" in doc_type and shipment.get("irsaliye_id"):
-        logger.info(f"Mevcut irsaliye seçilmiş ({shipment.get('irsaliye_id')}), yeni oluşturulmayacak.")
-    elif "İrsaliye" in doc_type:
-        if not invoice_url:
-            msg = "Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. İrsaliye oluşturulamadı."
-            logger.warning(msg)
-            warnings.append(msg)
-        else:
-            invoice_id = invoice_url.rstrip("/").split("/")[-1]
-            planned_date = shipment.get("planned_ship_date") or None
-            addr = shipment.get("delivery_address")
-            dist = shipment.get("delivery_district")
-            city = shipment.get("delivery_city")
-            zipp = shipment.get("delivery_zip")
-            dlv_type = shipment.get("delivery_type")
-            cargo_co = shipment.get("cargo_company")
-            import datetime as _dt2
-            with open("debug_shipment.log", "a", encoding="utf-8") as _f2:
-                _f2.write(
-                    f"[{_dt2.datetime.now()}] irsaliye_params: "
-                    f"invoice={invoice_id} date={planned_date} "
-                    f"addr={addr!r} dist={dist!r} city={city!r} zip={zipp!r} "
-                    f"delivery_type={dlv_type!r} cargo_company={cargo_co!r}\n"
-                )
-            try:
-                result = asyncio.run(parasut.create_irsaliye_from_invoice(
-                    invoice_id,
-                    issue_date=planned_date,
-                    delivery_address=addr,
-                    delivery_district=dist,
-                    delivery_city=city,
-                    delivery_zip=zipp,
-                    delivery_type=dlv_type,
-                    cargo_company=cargo_co,
-                ))
-                irsaliye_id = result.get("data", {}).get("id")
-                if irsaliye_id:
-                    db.query(ShipmentRequest).filter(
-                        ShipmentRequest.id == shipment["id"]
-                    ).update({"irsaliye_id": irsaliye_id})
-                    db.commit()
-                logger.info(f"İrsaliye created for invoice {invoice_id}: {irsaliye_id}")
-            except Exception as e:
-                msg = f"Paraşüt'te irsaliye oluşturulamadı: {e}"
-                logger.error(f"Paraşüt irsaliye failed for invoice {invoice_id}: {e}")
-                warnings.append(msg)
+    # 3. Paraşüt irsaliye
+    warnings.extend(_create_irsaliye_for_shipment_dict(db, shipment))
 
+    return warnings
+
+
+def _create_irsaliye_for_shipment_dict(db: Session, shipment: dict) -> list:
+    """Sevk talebi için Paraşüt irsaliyesi oluşturur (gerekiyorsa).
+    Koşullar:
+      - shipping_doc_type 'İrsaliye' içerir
+      - irsaliye_id zaten dolu DEĞİL (mevcut irsaliye seçilmemiş)
+      - invoice_url dolu (Paraşüt faturasıyla eşleşmiş)
+    Hem creation hem revision (PUT) akışından çağrılır.
+    """
+    warnings = []
+    doc_type = shipment.get("shipping_doc_type") or ""
+    if "İrsaliye" not in doc_type:
+        return warnings
+    if shipment.get("irsaliye_id"):
+        logger.info(f"Mevcut irsaliye seçilmiş ({shipment.get('irsaliye_id')}), yeni oluşturulmayacak.")
+        return warnings
+    invoice_url = shipment.get("invoice_url") or ""
+    if not invoice_url:
+        msg = "Gönderim belgesi İrsaliye seçildi ancak bu siparişe eşleşen Paraşüt faturası bulunamadı. İrsaliye oluşturulamadı."
+        logger.warning(msg)
+        warnings.append(msg)
+        return warnings
+
+    invoice_id = invoice_url.rstrip("/").split("/")[-1]
+    try:
+        result = asyncio.run(parasut.create_irsaliye_from_invoice(
+            invoice_id,
+            issue_date=shipment.get("planned_ship_date") or None,
+            delivery_address=shipment.get("delivery_address"),
+            delivery_district=shipment.get("delivery_district"),
+            delivery_city=shipment.get("delivery_city"),
+            delivery_zip=shipment.get("delivery_zip"),
+            delivery_type=shipment.get("delivery_type"),
+            cargo_company=shipment.get("cargo_company"),
+        ))
+        irsaliye_id = result.get("data", {}).get("id")
+        if irsaliye_id:
+            db.query(ShipmentRequest).filter(
+                ShipmentRequest.id == shipment["id"]
+            ).update({"irsaliye_id": irsaliye_id})
+            db.commit()
+        logger.info(f"İrsaliye created for invoice {invoice_id}: {irsaliye_id}")
+    except Exception as e:
+        msg = f"Paraşüt'te irsaliye oluşturulamadı: {e}"
+        logger.error(f"Paraşüt irsaliye failed for invoice {invoice_id}: {e}")
+        warnings.append(msg)
     return warnings
 
 
@@ -736,7 +736,16 @@ def update_shipment(
 
     db.commit()
     db.refresh(s)
-    return _shipment_to_dict(s)
+
+    result = _shipment_to_dict(s)
+    # Revizyon: shipping_doc_type 'İrsaliye' içeriyor ve hâlâ irsaliye yoksa
+    # otomatik oluştur (sıfırdan oluşturma akışıyla aynı)
+    warnings = _create_irsaliye_for_shipment_dict(db, result)
+    # Helper irsaliye_id'yi DB'de güncellemiş olabilir → s'yi tazele
+    db.refresh(s)
+    result = _shipment_to_dict(s)
+    result["warnings"] = warnings
+    return result
 
 
 @router.post("/{shipment_id}/reject")
