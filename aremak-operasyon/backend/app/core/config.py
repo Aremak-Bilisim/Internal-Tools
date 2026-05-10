@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     HEPSIBURADA_SECRET_KEY: str = ""
     HEPSIBURADA_USER_AGENT: str = ""
 
+    # Public API key — kamera secici uygulamasi ve benzeri 3rd-party agent'lar icin.
+    # /api/public/* endpoint'lerinde X-API-Key header ile dogrulanir. Bos birakilirsa
+    # bu endpoint'ler 503 doner (yanlislikla acik kalmayi onlemek icin).
+    CAMERA_AGENT_API_KEY: str = ""
+
     class Config:
         env_file = ".env"
 
