@@ -8,6 +8,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.auth import get_current_user, require_role
+from app.core.config import settings
 from app.models.shipment import ShipmentRequest, ShipmentHistory
 from app.models.user import User
 from app.models.notification import Notification
