@@ -349,10 +349,20 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
 
     # 3. Kredi Kartı ödeme şekli → fatura tutarına %komisyon ekle.
     #    İrsaliye blok'undan ÖNCE çalışır — irsaliye yeni (×oran) tutarla yaratılsın.
-    warnings.extend(_apply_credit_card_surcharge_if_needed(db, shipment, tg_order_id))
+    #    Belt-and-suspenders: helper içi try/except'leri zaten var ama her ihtimale
+    #    karşı dış try ile sevk talebi creation'ı bloklamasını engelle.
+    try:
+        warnings.extend(_apply_credit_card_surcharge_if_needed(db, shipment, tg_order_id))
+    except Exception as e:
+        logger.exception(f"Kredi kartı komisyonu helper beklenmedik hata: {e}")
+        warnings.append(f"Kredi kartı komisyonu uygulanamadı (beklenmedik hata, log'a bakın)")
 
     # 4. Paraşüt irsaliye
-    warnings.extend(_create_irsaliye_for_shipment_dict(db, shipment))
+    try:
+        warnings.extend(_create_irsaliye_for_shipment_dict(db, shipment))
+    except Exception as e:
+        logger.exception(f"İrsaliye helper beklenmedik hata: {e}")
+        warnings.append(f"Paraşüt irsaliye oluşturulamadı (beklenmedik hata, log'a bakın)")
 
     return warnings
 
@@ -826,11 +836,20 @@ def update_shipment(
     db.refresh(s)
 
     result = _shipment_to_dict(s)
-    # Revizyon flow'unda da creation ile aynı sırayla:
+    # Revizyon flow'unda da creation ile aynı sırayla (her ikisi de try'lı):
     #   1) Kredi kartı komisyonu (fatura varsa, Ödeme Şekli=Kredi Kartı ise, idempotent)
     #   2) İrsaliye oluştur (henüz yoksa, 'İrsaliye' doc_type ise)
-    warnings = _apply_credit_card_surcharge_if_needed(db, result, s.tg_order_id)
-    warnings.extend(_create_irsaliye_for_shipment_dict(db, result))
+    warnings = []
+    try:
+        warnings.extend(_apply_credit_card_surcharge_if_needed(db, result, s.tg_order_id))
+    except Exception as e:
+        logger.exception(f"Kredi kartı komisyonu helper beklenmedik hata: {e}")
+        warnings.append("Kredi kartı komisyonu uygulanamadı (beklenmedik hata, log'a bakın)")
+    try:
+        warnings.extend(_create_irsaliye_for_shipment_dict(db, result))
+    except Exception as e:
+        logger.exception(f"İrsaliye helper beklenmedik hata: {e}")
+        warnings.append("Paraşüt irsaliye oluşturulamadı (beklenmedik hata, log'a bakın)")
     # Helper'lar irsaliye_id'yi DB'de güncellemiş olabilir → s'yi tazele
     db.refresh(s)
     result = _shipment_to_dict(s)
