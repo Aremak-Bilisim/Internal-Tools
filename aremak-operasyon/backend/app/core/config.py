@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     HEPSIBURADA_SECRET_KEY: str = ""
     HEPSIBURADA_USER_AGENT: str = ""
 
+    # Kredi karti komisyon orani — sevk talebi olusturuldugunda TG order'in
+    # 'Odeme Sekli' CF'si 'Kredi Karti' ise bagli Parasut faturasindaki tum item'larin
+    # birim fiyati (1 + ORAN) ile carpilir. 0.02 = %2 default.
+    KREDI_KARTI_KOMISYON_ORAN: float = 0.02
+
     # Public API key — kamera secici uygulamasi ve benzeri 3rd-party agent'lar icin.
     # /api/public/* endpoint'lerinde X-API-Key header ile dogrulanir. Bos birakilirsa
     # bu endpoint'ler 503 doner (yanlislikla acik kalmayi onlemek icin).

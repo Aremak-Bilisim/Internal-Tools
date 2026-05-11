@@ -1052,3 +1052,84 @@ async def search_product_by_code(code: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"Paraşüt ürün arama hatası ({code}): {e}")
     return None
+
+
+async def apply_invoice_surcharge(
+    invoice_id: str,
+    multiplier: float,
+    description_marker: str,
+) -> dict:
+    """Faturadaki tüm detail satırlarının unit_price'ını `multiplier` ile çarpar,
+    description sonuna marker ekler. Idempotent — marker zaten varsa hiçbir şey yapmaz.
+
+    Test edildi: PUT /sales_invoices/{id} + relationships.details.data (id'leri ile birlikte
+    inline) → Paraşüt detail'leri update eder, gross/net otomatik recalc eder.
+
+    Returns:
+      {"status": "applied"|"skipped"|"error", "message": str, "invoice": dict|None}
+    """
+    # 1) Faturayı detaylarıyla çek
+    try:
+        data = await _api_get(f"sales_invoices/{invoice_id}", {"include": "details"})
+    except Exception as e:
+        return {"status": "error", "message": f"Fatura okunamadı: {e}", "invoice": None}
+
+    inv = data.get("data") or {}
+    attrs = inv.get("attributes") or {}
+    desc = attrs.get("description") or ""
+
+    # 2) Idempotency — marker zaten varsa atla
+    if description_marker in desc:
+        return {"status": "skipped", "message": "Marker zaten var", "invoice": inv}
+
+    # 3) Detail'leri çek
+    included = {f"{i['type']}/{i['id']}": i for i in (data.get("included") or [])}
+    detail_refs = inv.get("relationships", {}).get("details", {}).get("data") or []
+    if not detail_refs:
+        return {"status": "error", "message": "Fatura'da detay yok", "invoice": inv}
+
+    new_details = []
+    for ref in detail_refs:
+        d = included.get(f"{ref['type']}/{ref['id']}", {})
+        da = d.get("attributes") or {}
+        old_price = float(da.get("unit_price") or 0)
+        new_price = round(old_price * multiplier, 4)
+        new_details.append({
+            "id": d["id"],
+            "type": "sales_invoice_details",
+            "attributes": {
+                "quantity": da.get("quantity"),
+                "unit_price": new_price,
+                "vat_rate": da.get("vat_rate"),
+                "discount_type": da.get("discount_type", "percentage"),
+                "discount_value": da.get("discount_value", 0),
+                "excise_duty_type": da.get("excise_duty_type", "percentage"),
+                "excise_duty_value": da.get("excise_duty_value", 0),
+                "description": da.get("description") or "",
+            },
+            "relationships": d.get("relationships") or {},
+        })
+
+    # 4) PUT inline ile update et + description suffix
+    new_desc = f"{desc} - {description_marker}".strip(" -") if desc else description_marker
+    put_payload = {
+        "data": {
+            "id": str(invoice_id),
+            "type": "sales_invoices",
+            "attributes": {"description": new_desc},
+            "relationships": {"details": {"data": new_details}},
+        }
+    }
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.put(
+            f"{BASE}/v4/{COMPANY}/sales_invoices/{invoice_id}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/vnd.api+json"},
+            json=put_payload,
+        )
+    if not r.is_success:
+        return {"status": "error",
+                "message": f"PUT fail ({r.status_code}): {r.text[:200]}",
+                "invoice": inv}
+    logger.info(f"Faturaya komisyon uygulandı: invoice={invoice_id} multiplier={multiplier} marker={description_marker!r}")
+    return {"status": "applied", "message": "OK", "invoice": r.json().get("data")}

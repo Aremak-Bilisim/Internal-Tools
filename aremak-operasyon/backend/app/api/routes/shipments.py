@@ -347,8 +347,96 @@ def _post_create_effects(db: Session, shipment: dict, tg_order_id: Optional[int]
         except Exception as e:
             logger.error(f"TeamGram status update failed: {e}")
 
-    # 3. Paraşüt irsaliye
+    # 3. Kredi Kartı ödeme şekli → fatura tutarına %komisyon ekle.
+    #    İrsaliye blok'undan ÖNCE çalışır — irsaliye yeni (×oran) tutarla yaratılsın.
+    warnings.extend(_apply_credit_card_surcharge_if_needed(db, shipment, tg_order_id))
+
+    # 4. Paraşüt irsaliye
     warnings.extend(_create_irsaliye_for_shipment_dict(db, shipment))
+
+    return warnings
+
+
+# ─── Kredi Kartı Komisyonu Helper ────────────────────────────────────────────
+CF_ID_ODEME_SEKLI = 193792
+OPT_ID_KREDI_KARTI = 15006   # 15005 = Havale, 15006 = Kredi Kartı
+KREDI_KARTI_MARKER = "Kredi Kartı ile ödenmiştir."
+
+
+def _apply_credit_card_surcharge_if_needed(
+    db: Session, shipment: dict, tg_order_id: Optional[int]
+) -> list:
+    """TG 'Ödeme Şekli' CF == Kredi Kartı ise bağlı Paraşüt faturasının tüm
+    detay birim fiyatlarını (1 + KREDI_KARTI_KOMISYON_ORAN) ile çarpar, marker yazar.
+    Idempotent (description'da marker varsa skip).
+
+    Hem creation (_post_create_effects) hem revizyon (update_shipment) flow'undan
+    çağrılır. Marker sayesinde double-charge engellenir.
+    """
+    warnings = []
+    if not tg_order_id:
+        return warnings
+    invoice_url = shipment.get("invoice_url") or ""
+    if not invoice_url:
+        return warnings  # Fatura yoksa zaten yapacak iş yok
+
+    # 1) TG order'dan CF 'Ödeme Şekli' oku (taze)
+    try:
+        order = asyncio.run(teamgram.get_order(tg_order_id))
+    except Exception as e:
+        logger.warning(f"TG order okunamadı (id={tg_order_id}): {e}")
+        return warnings
+
+    cf = next((f for f in (order.get("CustomFieldDatas") or [])
+               if f.get("CustomFieldId") == CF_ID_ODEME_SEKLI), None)
+    if not cf:
+        return warnings  # CF tanımlı değil veya boş
+
+    # Value JSON: {"Id":15006,"Value":"Kredi Kartı",...} veya raw "15006"
+    selected_id = None
+    raw = cf.get("Value")
+    if raw:
+        try:
+            import json as _json
+            parsed = _json.loads(raw)
+            if isinstance(parsed, dict):
+                selected_id = parsed.get("Id")
+        except Exception:
+            try:
+                selected_id = int(raw)
+            except Exception:
+                pass
+
+    if selected_id != OPT_ID_KREDI_KARTI:
+        return warnings  # Havale ya da boş
+
+    # 2) invoice_id'yi URL'den ayıkla
+    invoice_id = invoice_url.rstrip("/").split("/")[-1]
+    multiplier = 1.0 + (settings.KREDI_KARTI_KOMISYON_ORAN or 0.02)
+
+    # 3) Paraşüt'te uygula (idempotent)
+    try:
+        result = asyncio.run(parasut.apply_invoice_surcharge(
+            invoice_id=invoice_id,
+            multiplier=multiplier,
+            description_marker=KREDI_KARTI_MARKER,
+        ))
+    except Exception as e:
+        msg = f"Kredi kartı komisyonu uygulanamadı (fatura={invoice_id}): {e}"
+        logger.error(msg)
+        warnings.append(msg)
+        return warnings
+
+    status = result.get("status")
+    if status == "applied":
+        logger.info(f"Kredi kartı komisyonu (%{settings.KREDI_KARTI_KOMISYON_ORAN*100:.1f}) "
+                    f"uygulandı: fatura={invoice_id}")
+    elif status == "skipped":
+        logger.info(f"Kredi kartı komisyonu zaten uygulanmış: fatura={invoice_id}")
+    else:
+        msg = f"Kredi kartı komisyonu uygulanamadı (fatura={invoice_id}): {result.get('message')}"
+        logger.warning(msg)
+        warnings.append(msg)
 
     return warnings
 
@@ -738,10 +826,12 @@ def update_shipment(
     db.refresh(s)
 
     result = _shipment_to_dict(s)
-    # Revizyon: shipping_doc_type 'İrsaliye' içeriyor ve hâlâ irsaliye yoksa
-    # otomatik oluştur (sıfırdan oluşturma akışıyla aynı)
-    warnings = _create_irsaliye_for_shipment_dict(db, result)
-    # Helper irsaliye_id'yi DB'de güncellemiş olabilir → s'yi tazele
+    # Revizyon flow'unda da creation ile aynı sırayla:
+    #   1) Kredi kartı komisyonu (fatura varsa, Ödeme Şekli=Kredi Kartı ise, idempotent)
+    #   2) İrsaliye oluştur (henüz yoksa, 'İrsaliye' doc_type ise)
+    warnings = _apply_credit_card_surcharge_if_needed(db, result, s.tg_order_id)
+    warnings.extend(_create_irsaliye_for_shipment_dict(db, result))
+    # Helper'lar irsaliye_id'yi DB'de güncellemiş olabilir → s'yi tazele
     db.refresh(s)
     result = _shipment_to_dict(s)
     result["warnings"] = warnings
