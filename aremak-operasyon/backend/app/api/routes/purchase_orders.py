@@ -77,12 +77,14 @@ async def list_purchase_orders(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Hikrobot'un TG'deki tedarikçi siparişlerini listeler.
-    Toplam tutar: kalemlerden hesaplanır (KDV hariç) — TG'nin DiscountedTotal'ı KDV dahil ve TL'ye çevrilmiş."""
+    """TG'deki tüm tedarikçi siparişlerini listeler (multi-supplier).
+    Toplam tutar: kalemlerden hesaplanır (KDV hariç) — TG'nin DiscountedTotal'ı KDV dahil ve TL'ye çevrilmiş.
+    NOT: Eskiden sadece Hikrobot çekilirdi; talep listesi multi-supplier akışıyla birlikte
+    party_id filtresi kaldırıldı, tüm tedarikçilerin siparişleri görünüyor."""
     import asyncio
 
     try:
-        data = await teamgram.get_purchases(page=1, pagesize=50, party_id=HIKROBOT_COMPANY_ID)
+        data = await teamgram.get_purchases(page=1, pagesize=100)
     except Exception as e:
         raise HTTPException(502, f"TG'den siparişler alınamadı: {e}")
 
