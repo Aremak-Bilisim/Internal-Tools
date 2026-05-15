@@ -164,6 +164,23 @@ export default function PurchaseRequestsPage() {
     } finally { setAutoFilling(false) }
   }
 
+  const [autoFillingListId, setAutoFillingListId] = useState(null)
+  const autoFillForList = async (listId) => {
+    setAutoFillingListId(listId)
+    try {
+      const r = await api.post(`/purchase-requests/lists/${listId}/auto-fill-critical-stock`)
+      const d = r.data || {}
+      if (d.added > 0) {
+        message.success(`${d.added} ürün eklendi (zaten ekli: ${d.skipped_already}, eşik üstü: ${d.skipped_below_threshold})`)
+      } else {
+        message.info(`Eklenecek ürün yok (zaten ekli: ${d.skipped_already}, eşik üstü: ${d.skipped_below_threshold}, başka tedarikçi: ${d.skipped_other_supplier})`)
+      }
+      load()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || 'Auto-fill hatası')
+    } finally { setAutoFillingListId(null) }
+  }
+
   const updateItem = async (itemId, body) => {
     try {
       await api.patch(`/purchase-requests/items/${itemId}`, body)
@@ -315,6 +332,14 @@ export default function PurchaseRequestsPage() {
                   {Number(lst.total_value || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                   {' '}{enriched[0]?.currency || ''}
                 </Text>
+                <Button
+                  size="small" icon={<ThunderboltOutlined />}
+                  loading={autoFillingListId === lst.id}
+                  onClick={() => autoFillForList(lst.id)}
+                  title={`${lst.supplier_name} tedarikçisinin kritik stok ürünlerini bu listeye ekle`}
+                >
+                  Kritik Stoktan Ekle
+                </Button>
                 <Button
                   type="primary" size="small" icon={<ShoppingCartOutlined />}
                   disabled={(lst.items?.length || 0) === 0}

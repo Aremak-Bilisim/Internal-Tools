@@ -466,6 +466,129 @@ async def auto_fill_critical_stock(
     }
 
 
+@router.post("/lists/{list_id}/auto-fill-critical-stock")
+async def auto_fill_critical_stock_for_list(
+    list_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "sales")),
+):
+    """Sadece bu listenin tedarikçisine ait kritik stok ürünlerini bu listeye ekle.
+    needed = critical_inventory - inventory + reserved - incoming.
+    Idempotent: bu listede zaten varsa atla.
+    """
+    lst = db.query(PurchaseRequestList).filter(PurchaseRequestList.id == list_id).first()
+    if not lst:
+        raise HTTPException(404, "Talep listesi bulunamadı")
+    if lst.status != "open":
+        raise HTTPException(400, "Bu liste kapalı, ürün eklenemez")
+
+    # incoming map (aynı global auto-fill ile, ortak helper'a çekilebilir)
+    incoming_map = {}
+    try:
+        page = 1
+        open_ids = []
+        while True:
+            data = await teamgram.get_purchases(page=page, pagesize=50)
+            for p in data.get("List") or []:
+                if p.get("Status") == 0:
+                    open_ids.append(p["Id"])
+            if page >= 5 or len(data.get("List") or []) < 50:
+                break
+            page += 1
+        import asyncio as _a
+        sem = _a.Semaphore(3)
+        async def _fp(pid):
+            async with sem:
+                try: return await teamgram.get_purchase(pid)
+                except: return None
+        results = await _a.gather(*[_fp(p) for p in open_ids])
+        for r in results:
+            if not r: continue
+            for it in r.get("Items") or []:
+                pid = (it.get("Product") or {}).get("Id")
+                qty = float(it.get("Quantity") or 0)
+                if pid and qty > 0:
+                    incoming_map[pid] = incoming_map.get(pid, 0) + qty
+    except Exception as e:
+        logger.warning(f"incoming map: {e}")
+
+    candidates = (db.query(Product)
+                  .filter(Product.critical_inventory > 0,
+                          Product.not_available == False,  # noqa
+                          Product.no_inventory == False)   # noqa
+                  .all())
+
+    added = 0
+    skipped_other_supplier = 0
+    skipped_no_supplier = 0
+    skipped_already = 0
+    skipped_below_threshold = 0
+
+    for p in candidates:
+        # Ürünün tedarikçisi: önce default, yoksa brand mapping
+        if p.default_supplier_tg_id:
+            sup_id = p.default_supplier_tg_id
+        else:
+            sup = _supplier_for_brand(p.brand)
+            if not sup:
+                skipped_no_supplier += 1
+                continue
+            sup_id = sup[0]
+
+        # Sadece bu listenin tedarikçisine ait ürünler
+        if sup_id != lst.tg_party_id:
+            skipped_other_supplier += 1
+            continue
+
+        # reserved (TG'den fresh)
+        reserved = 0.0
+        try:
+            inv = await teamgram._get(f"aremak/Products/InventoryOfEntity",
+                                      {"entityId": p.tg_id, "pagesize": 1}) if p.tg_id else None
+            if inv:
+                reserved = max(float(inv.get("Inventory") or 0) - float(inv.get("InventoryNow") or 0), 0)
+        except Exception:
+            reserved = 0.0
+
+        incoming = incoming_map.get(p.tg_id, 0)
+        needed = (p.critical_inventory or 0) - (p.inventory or 0) + reserved - incoming
+        if needed < 1:
+            skipped_below_threshold += 1
+            continue
+
+        existing = (db.query(PurchaseRequestItem)
+                    .filter(PurchaseRequestItem.list_id == lst.id,
+                            PurchaseRequestItem.product_id == p.id)
+                    .first())
+        if existing:
+            skipped_already += 1
+            continue
+
+        db.add(PurchaseRequestItem(
+            list_id=lst.id,
+            product_id=p.id,
+            product_tg_id=p.tg_id,
+            product_brand=p.brand,
+            product_model=p.prod_model,
+            product_sku=p.sku,
+            quantity=round(needed, 2),
+            unit_price=p.purchase_price,
+            currency=p.purchase_currency_name,
+            source="auto_critical_stock",
+            added_by_id=current_user.id,
+        ))
+        added += 1
+
+    db.commit()
+    return {
+        "added": added,
+        "skipped_already": skipped_already,
+        "skipped_below_threshold": skipped_below_threshold,
+        "skipped_other_supplier": skipped_other_supplier,
+        "skipped_no_supplier": skipped_no_supplier,
+    }
+
+
 # ── Close (yeni TG sipariş ile eşleştir) ─────────────────────────────────────
 
 class CloseListBody(BaseModel):
