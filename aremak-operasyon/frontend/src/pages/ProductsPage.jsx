@@ -435,9 +435,25 @@ export default function ProductsPage() {
       render: (_, r) => {
         if (r.no_inventory) return <Tag>Takipsiz</Tag>
         const v = r.inventory ?? 0
-        return <Tag color={v > 0 ? 'green' : 'red'}>{v}</Tag>
+        const crit = r.critical_inventory ?? 0
+        // Stok kritik eşiğin altında veya eşitse turuncu uyarı
+        const color = v <= 0 ? 'red' : (crit > 0 && v <= crit ? 'orange' : 'green')
+        return <Tag color={color}>{v}</Tag>
       },
     },
+    ...(isAdmin ? [{
+      title: 'Kritik Stok',
+      dataIndex: 'critical_inventory',
+      key: 'critical_inventory',
+      width: 100,
+      align: 'center',
+      sorter: (a, b) => (a.critical_inventory ?? 0) - (b.critical_inventory ?? 0),
+      render: (v, r) => {
+        if (r.no_inventory) return <span style={{ color: '#bfbfbf' }}>—</span>
+        const c = v ?? 0
+        return c > 0 ? <Tag color="geekblue">{c}</Tag> : <span style={{ color: '#bfbfbf' }}>—</span>
+      },
+    }] : []),
     {
       title: 'Tedarikçi Sip.',
       key: 'incoming',
