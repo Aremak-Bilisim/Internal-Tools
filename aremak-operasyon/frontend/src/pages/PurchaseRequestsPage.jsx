@@ -3,9 +3,10 @@ import {
   Card, Table, Tag, Button, Typography, Space, Modal, Form, Input, InputNumber,
   Select, message, Popconfirm, Divider, Tooltip, Spin, Checkbox,
 } from 'antd'
-import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined, ShoppingCartOutlined } from '@ant-design/icons'
+import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined, ShoppingCartOutlined, FileExcelOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useAuthStore } from '../store/auth'
 
 const { Title, Text } = Typography
 
@@ -340,6 +341,35 @@ export default function PurchaseRequestsPage() {
                   title={`${lst.supplier_name} tedarikçisinin kritik stok ürünlerini bu listeye ekle`}
                 >
                   Kritik Stoktan Ekle
+                </Button>
+                <Button
+                  size="small" icon={<FileExcelOutlined />}
+                  disabled={(lst.items?.length || 0) === 0}
+                  onClick={() => {
+                    // Auth header'lı blob download
+                    const token = useAuthStore.getState().token
+                    fetch(`/api/purchase-requests/lists/${lst.id}/export`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    })
+                      .then(r => {
+                        if (!r.ok) throw new Error('Export başarısız')
+                        // Server'dan gelen Content-Disposition'dan dosya adını çek
+                        const cd = r.headers.get('content-disposition') || ''
+                        const m = cd.match(/filename="?([^";]+)"?/)
+                        const fname = m ? m[1] : `talep_listesi_${lst.id}.xlsx`
+                        return r.blob().then(b => ({ blob: b, fname }))
+                      })
+                      .then(({ blob, fname }) => {
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url; a.download = fname
+                        document.body.appendChild(a); a.click()
+                        document.body.removeChild(a); URL.revokeObjectURL(url)
+                      })
+                      .catch(e => message.error(e.message || 'Export başarısız'))
+                  }}
+                >
+                  Excel
                 </Button>
                 <Button
                   type="primary" size="small" icon={<ShoppingCartOutlined />}

@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -587,6 +588,115 @@ async def auto_fill_critical_stock_for_list(
         "skipped_other_supplier": skipped_other_supplier,
         "skipped_no_supplier": skipped_no_supplier,
     }
+
+
+@router.get("/lists/{list_id}/export")
+def export_list_excel(
+    list_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Talep listesini Excel olarak indir. Kolonlar: Model, Sipariş Adeti, Birim Fiyat, Toplam Fiyat.
+    Alt satırda: Toplam Adet + Toplam Tutar (PB'lere göre)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+    from datetime import datetime
+    import re
+
+    lst = db.query(PurchaseRequestList).filter(PurchaseRequestList.id == list_id).first()
+    if not lst:
+        raise HTTPException(404, "Talep listesi bulunamadı")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Liste #{list_id}"[:31]
+
+    # Stil
+    bold = Font(name="Calibri", bold=True)
+    header_fill = PatternFill("solid", start_color="1677FF")
+    header_font = Font(name="Calibri", bold=True, color="FFFFFF")
+    center = Alignment(horizontal="center", vertical="center")
+    right = Alignment(horizontal="right", vertical="center")
+    thin = Side(style="thin", color="D9D9D9")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # Başlık (üst bilgi)
+    ws["A1"] = f"Tedarikçi: {lst.supplier_name or '-'}"
+    ws["A1"].font = bold
+    ws["A2"] = f"Liste No: #{lst.id}"
+    ws["A3"] = f"Tarih: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+    # Tablo başlığı (5. satır)
+    headers = ["Model", "Sipariş Adeti", "Birim Fiyat", "Toplam Fiyat"]
+    for i, h in enumerate(headers, 1):
+        c = ws.cell(row=5, column=i, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = center
+        c.border = box
+
+    # Satırlar
+    totals_by_currency = {}  # {"USD": 12345.67, "EUR": ...}
+    total_qty = 0.0
+    row = 6
+    for it in lst.items:
+        qty = float(it.quantity or 0)
+        up = float(it.unit_price or 0)
+        line = qty * up
+        cur = (it.currency or "").strip() or "-"
+        totals_by_currency[cur] = totals_by_currency.get(cur, 0.0) + line
+        total_qty += qty
+
+        ws.cell(row=row, column=1, value=it.product_model or "-").border = box
+        c = ws.cell(row=row, column=2, value=qty); c.border = box; c.alignment = right
+        c.number_format = "#,##0.##"
+        c = ws.cell(row=row, column=3, value=up); c.border = box; c.alignment = right
+        c.number_format = f"#,##0.00 \"{cur}\""
+        c = ws.cell(row=row, column=4, value=f"=B{row}*C{row}"); c.border = box; c.alignment = right
+        c.number_format = f"#,##0.00 \"{cur}\""
+        row += 1
+
+    # TOPLAM satırı
+    total_row = row + 1
+    ws.cell(row=total_row, column=1, value="TOPLAM").font = bold
+    c = ws.cell(row=total_row, column=2, value=f"=SUM(B6:B{row - 1})" if row > 6 else 0)
+    c.font = bold; c.alignment = right; c.number_format = "#,##0.##"
+
+    # Tutar: tek PB ise tek hücre, karışıksa her PB ayrı satır
+    if len(totals_by_currency) == 1:
+        cur, tot = next(iter(totals_by_currency.items()))
+        c = ws.cell(row=total_row, column=4, value=f"=SUM(D6:D{row - 1})" if row > 6 else 0)
+        c.font = bold; c.alignment = right; c.number_format = f"#,##0.00 \"{cur}\""
+    elif len(totals_by_currency) > 1:
+        ws.cell(row=total_row, column=4, value="Karışık para birimi").font = bold
+        # Detayları alt satırlara yaz
+        for i, (cur, tot) in enumerate(sorted(totals_by_currency.items()), 1):
+            c = ws.cell(row=total_row + i, column=3, value=f"{cur}:")
+            c.font = bold; c.alignment = right
+            c = ws.cell(row=total_row + i, column=4, value=tot)
+            c.font = bold; c.alignment = right
+            c.number_format = f"#,##0.00 \"{cur}\""
+
+    # Kolon genişlikleri
+    ws.column_dimensions["A"].width = 45
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["D"].width = 22
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    # Dosya adı: liste no + tedarikçi adı (güvenli karakter)
+    safe_supplier = re.sub(r"[^a-zA-Z0-9_-]+", "_", (lst.supplier_name or "tedarikci"))[:40].strip("_")
+    fname = f"talep_listesi_{lst.id}_{safe_supplier}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 # ── Close (yeni TG sipariş ile eşleştir) ─────────────────────────────────────
