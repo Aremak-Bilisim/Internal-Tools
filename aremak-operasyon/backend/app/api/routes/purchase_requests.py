@@ -536,7 +536,7 @@ async def auto_fill_critical_stock_for_list(
             sup_id = sup[0]
 
         # Sadece bu listenin tedarikçisine ait ürünler
-        if sup_id != lst.tg_party_id:
+        if sup_id != lst.tg_supplier_id:
             skipped_other_supplier += 1
             continue
 
