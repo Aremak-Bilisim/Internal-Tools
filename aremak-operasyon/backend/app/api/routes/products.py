@@ -69,7 +69,7 @@ def _to_dict(p: Product) -> dict:
 @router.get("")
 async def list_products(
     page: int = Query(1, ge=1),
-    pagesize: int = Query(50, ge=1, le=200),
+    pagesize: int = Query(50, ge=1, le=5000),
     search: Optional[str] = Query(None),
     parent_category_id: Optional[int] = Query(None),
     category_id: Optional[int] = Query(None),

@@ -36,7 +36,8 @@ export default function PurchaseRequestsPage() {
   const loadProducts = async (search = '') => {
     setProductLoading(true)
     try {
-      const params = new URLSearchParams({ pagesize: 50 })
+      // Search varsa 50'lik dropdown için; yoksa tüm portföyü çek (stok lookup için map).
+      const params = new URLSearchParams({ pagesize: search ? 50 : 5000 })
       if (search) params.set('search', search)
       const r = await api.get(`/products?${params}`)
       setProducts(r.data?.items || [])
