@@ -649,8 +649,11 @@ def export_list_excel(
         total_qty += qty
 
         ws.cell(row=row, column=1, value=it.product_model or "-").border = box
-        c = ws.cell(row=row, column=2, value=qty); c.border = box; c.alignment = right
-        c.number_format = "#,##0.##"
+        # Quantity: integer ise "#,##0", fraction varsa "#,##0.##" (trailing nokta sorununu engelle)
+        qty_int = qty == int(qty)
+        c = ws.cell(row=row, column=2, value=int(qty) if qty_int else qty)
+        c.border = box; c.alignment = right
+        c.number_format = "#,##0" if qty_int else "#,##0.##"
         c = ws.cell(row=row, column=3, value=up); c.border = box; c.alignment = right
         c.number_format = f"#,##0.00 \"{cur}\""
         c = ws.cell(row=row, column=4, value=f"=B{row}*C{row}"); c.border = box; c.alignment = right
@@ -661,7 +664,9 @@ def export_list_excel(
     total_row = row + 1
     ws.cell(row=total_row, column=1, value="TOPLAM").font = bold
     c = ws.cell(row=total_row, column=2, value=f"=SUM(B6:B{row - 1})" if row > 6 else 0)
-    c.font = bold; c.alignment = right; c.number_format = "#,##0.##"
+    c.font = bold; c.alignment = right
+    # Toplam adet de integer ise trailing nokta gözükmesin
+    c.number_format = "#,##0" if total_qty == int(total_qty) else "#,##0.##"
 
     # Tutar: tek PB ise tek hücre, karışıksa her PB ayrı satır
     if len(totals_by_currency) == 1:
