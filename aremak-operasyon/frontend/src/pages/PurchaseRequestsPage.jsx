@@ -211,8 +211,19 @@ export default function PurchaseRequestsPage() {
     }
   }
 
-  const grandTotal = useMemo(() => lists.reduce((sum, l) => sum + (l.total_value || 0), 0), [lists])
+  // Para birimi bazlı genel toplam: items'tan grupla (list.total_value PB-agnostik, karışıkta yanıltıcı)
   const grandQty = useMemo(() => lists.reduce((sum, l) => sum + (l.total_quantity || 0), 0), [lists])
+  const grandTotalsByCurrency = useMemo(() => {
+    const acc = {}
+    for (const l of lists) {
+      for (const it of (l.items || [])) {
+        const cur = (it.currency || '').trim() || '—'
+        const line = (it.quantity || 0) * (it.unit_price || 0)
+        acc[cur] = (acc[cur] || 0) + line
+      }
+    }
+    return acc
+  }, [lists])
 
   const buildColumns = () => [
     {
@@ -425,9 +436,19 @@ export default function PurchaseRequestsPage() {
             <Text strong style={{ marginRight: 24 }}>GENEL TOPLAM:</Text>
             <Text strong>{grandQty} adet</Text>
             <Divider type="vertical" />
-            <Text strong style={{ color: '#1677ff' }}>
-              {Number(grandTotal).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (karışık para birimi)
-            </Text>
+            {Object.entries(grandTotalsByCurrency).length === 0 ? (
+              <Text type="secondary">—</Text>
+            ) : (
+              <Space split={<Divider type="vertical" />}>
+                {Object.entries(grandTotalsByCurrency)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([cur, total]) => (
+                    <Text key={cur} strong style={{ color: '#1677ff' }}>
+                      {Number(total).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {cur}
+                    </Text>
+                  ))}
+              </Space>
+            )}
           </div>
         </Card>
       )}
