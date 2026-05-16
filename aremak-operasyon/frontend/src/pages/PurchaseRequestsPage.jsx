@@ -3,7 +3,7 @@ import {
   Card, Table, Tag, Button, Typography, Space, Modal, Form, Input, InputNumber,
   Select, message, Popconfirm, Divider, Tooltip, Spin, Checkbox,
 } from 'antd'
-import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined, ShoppingCartOutlined, FileExcelOutlined } from '@ant-design/icons'
+import { PlusOutlined, ThunderboltOutlined, ReloadOutlined, DeleteOutlined, ShoppingCartOutlined, FileExcelOutlined, DownOutlined, RightOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/auth'
@@ -15,6 +15,15 @@ export default function PurchaseRequestsPage() {
   const [lists, setLists] = useState([])
   const [loading, setLoading] = useState(false)
   const [autoFilling, setAutoFilling] = useState(false)
+  // Collapse: default tüm kartlar kapalı (özet görünür); chevron ile aç/kapa
+  const [expandedListIds, setExpandedListIds] = useState(new Set())
+  const toggleExpanded = (id) => {
+    setExpandedListIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
   const [addOpen, setAddOpen] = useState(false)
   const [products, setProducts] = useState([])
   const [productLoading, setProductLoading] = useState(false)
@@ -316,11 +325,17 @@ export default function PurchaseRequestsPage() {
 
       {lists.map(lst => {
         const enriched = (lst.items || []).map(it => ({ ...it, _product: productsById[it.product_id] }))
+        const isExpanded = expandedListIds.has(lst.id)
         return (
           <Card
             key={lst.id}
             title={
-              <Space>
+              <Space style={{ cursor: 'pointer' }} onClick={() => toggleExpanded(lst.id)}>
+                <Button
+                  type="text" size="small"
+                  icon={isExpanded ? <DownOutlined /> : <RightOutlined />}
+                  onClick={(e) => { e.stopPropagation(); toggleExpanded(lst.id) }}
+                />
                 <Text strong>{lst.supplier_name}</Text>
                 <Tag color="blue">{lst.items?.length || 0} kalem</Tag>
                 <Tag>Liste #{lst.id}</Tag>
@@ -382,14 +397,17 @@ export default function PurchaseRequestsPage() {
             }
             style={{ marginBottom: 16 }}
             size="small"
+            bodyStyle={isExpanded ? undefined : { padding: 0 }}
           >
-            <Table
-              size="small"
-              rowKey="id"
-              dataSource={enriched}
-              columns={buildColumns()}
-              pagination={false}
-            />
+            {isExpanded && (
+              <Table
+                size="small"
+                rowKey="id"
+                dataSource={enriched}
+                columns={buildColumns()}
+                pagination={false}
+              />
+            )}
           </Card>
         )
       })}
