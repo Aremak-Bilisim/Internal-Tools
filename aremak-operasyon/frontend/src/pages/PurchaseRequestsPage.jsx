@@ -330,25 +330,32 @@ export default function PurchaseRequestsPage() {
           <Card
             key={lst.id}
             title={
-              <Space style={{ cursor: 'pointer' }} onClick={() => toggleExpanded(lst.id)}>
-                <Button
-                  type="text" size="small"
-                  icon={isExpanded ? <DownOutlined /> : <RightOutlined />}
-                  onClick={(e) => { e.stopPropagation(); toggleExpanded(lst.id) }}
-                />
-                <Text strong>{lst.supplier_name}</Text>
-                <Tag color="blue">{lst.items?.length || 0} kalem</Tag>
-                <Tag>Liste #{lst.id}</Tag>
-              </Space>
+              <div style={{ cursor: 'pointer' }} onClick={() => toggleExpanded(lst.id)}>
+                {/* 1. satır: chevron + supplier + Liste # */}
+                <Space>
+                  <Button
+                    type="text" size="small"
+                    icon={isExpanded ? <DownOutlined /> : <RightOutlined />}
+                    onClick={(e) => { e.stopPropagation(); toggleExpanded(lst.id) }}
+                  />
+                  <Text strong>{lst.supplier_name}</Text>
+                  <Tag>Liste #{lst.id}</Tag>
+                </Space>
+                {/* 2. satır: toplam özet */}
+                <div style={{ marginTop: 4, marginLeft: 32, fontSize: 12, color: '#595959', fontWeight: 400 }}>
+                  <Space size={8} split={<span style={{ color: '#d9d9d9' }}>·</span>}>
+                    <span>{lst.items?.length || 0} kalem</span>
+                    <span>{lst.total_quantity} adet</span>
+                    <span style={{ color: '#1677ff', fontWeight: 600 }}>
+                      {Number(lst.total_value || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      {' '}{enriched[0]?.currency || ''}
+                    </span>
+                  </Space>
+                </div>
+              </div>
             }
             extra={
               <Space>
-                <Text type="secondary">Toplam:</Text>
-                <Text strong>{lst.total_quantity} adet</Text>
-                <Text strong style={{ color: '#1677ff' }}>
-                  {Number(lst.total_value || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                  {' '}{enriched[0]?.currency || ''}
-                </Text>
                 <Button
                   size="small" icon={<ThunderboltOutlined />}
                   loading={autoFillingListId === lst.id}
